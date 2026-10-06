@@ -14,7 +14,7 @@ from app import crypto
 from app.accounts import KEY_PURPOSE, SECRET_PURPOSE
 from app.auth import TOTP_PURPOSE
 from app.db import SessionLocal
-from app.models import ExchangeAccount, User
+from app.models import AccountKey, User
 
 
 def _re(blob: bytes | None, purpose: str) -> bytes | None:
@@ -29,7 +29,7 @@ async def main() -> int:
         for u in await db.scalars(select(User).where(User.totp_secret_enc.is_not(None))):
             if (new := _re(u.totp_secret_enc, TOTP_PURPOSE)) is not None:
                 u.totp_secret_enc, n = new, n + 1
-        for a in await db.scalars(select(ExchangeAccount)):
+        for a in await db.scalars(select(AccountKey)):
             if (new := _re(a.api_key_enc, KEY_PURPOSE)) is not None:
                 a.api_key_enc, n = new, n + 1
             if (new := _re(a.api_secret_enc, SECRET_PURPOSE)) is not None:

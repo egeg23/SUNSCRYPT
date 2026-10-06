@@ -26,6 +26,7 @@ type Account = {
   leverage: number;
   capital_usd: number | null;
   daily_loss_pct: number;
+  keys: Record<"demo" | "real", { key_tail: string; status: string; status_detail: string | null; equity_usd: number | null } | null>;
 };
 
 type Engine = {
@@ -298,8 +299,18 @@ function Steps({ mode, ip }: { mode: "demo" | "real"; ip: string }) {
   );
 }
 
-function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
-  const [mode, setMode] = useState<"demo" | "real" | null>(null);
+function AddWizard({
+  ip,
+  onDone,
+  accountId,
+  fixedMode,
+}: {
+  ip: string;
+  onDone: () => void;
+  accountId?: string;
+  fixedMode?: "demo" | "real";
+}) {
+  const [mode, setMode] = useState<"demo" | "real" | null>(fixedMode ?? null);
   const { busy, run } = useSubmit();
   const [result, setResult] = useState<{ problems: string[]; warnings: string[] } | null>(null);
 
@@ -327,11 +338,18 @@ function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h3>{mode === "demo" ? "Демо-счёт" : "Реальный счёт"}: создайте ключ на Bybit</h3>
-        <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }} onClick={() => setMode(null)}>
-          ← другой счёт
-        </button>
+        {fixedMode ? null : (
+          <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }} onClick={() => setMode(null)}>
+            ← другой счёт
+          </button>
+        )}
       </div>
       <Steps mode={mode} ip={ip} />
+      <p style={{ fontSize: 14, color: "var(--accent)" }}>
+        ⚠ Этот счёт Bybit — только для SUNSCRYPT. На Bybit по каждой паре одна позиция на счёт, и движок
+        считает своими все позиции по торгуемым парам: сделки вручную или другим ботом на этом счёте он
+        будет закрывать.
+      </p>
       <form
         className="form"
         style={{ maxWidth: 480 }}
@@ -341,6 +359,16 @@ function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
           setResult(null);
           run(async () => {
             try {
+              const clean = (v: FormDataEntryValue | null) => String(v).replace(/[^A-Za-z0-9]/g, "");
+              if (accountId) {
+                await api(`/accounts/${accountId}/keys`, {
+                  mode,
+                  api_key: clean(f.get("api_key")),
+                  api_secret: clean(f.get("api_secret")),
+                });
+                onDone();
+                return;
+              }
               await api("/accounts", {
                 name: String(f.get("name") || (mode === "demo" ? "Демо" : "Реальный")),
                 mode,
@@ -358,10 +386,12 @@ function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
           });
         }}
       >
-        <label>
-          Название кабинета
-          <input name="name" maxLength={60} placeholder={mode === "demo" ? "Демо" : "Основной"} />
-        </label>
+        {accountId ? null : (
+          <label>
+            Название кабинета
+            <input name="name" maxLength={60} placeholder={mode === "demo" ? "Демо" : "Основной"} />
+          </label>
+        )}
         <label>
           API Key
           <input name="api_key" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} required />
@@ -392,13 +422,112 @@ function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
   );
 }
 
-function AccountCard({ a, reload }: { a: Account; reload: () => void }) {
+function ModeSwitch({ a, ip, realAllowed, reload }: { a: Account; ip: string; realAllowed: boolean; reload: () => void }) {
+  const { busy, error, run } = useSubmit();
+  const [want, setWant] = useState<"demo" | "real" | null>(null);
+  const seg = (m: "demo" | "real", label: string) => (
+    <button
+      type="button"
+      className="btn ghost"
+      aria-pressed={a.mode === m}
+      style={{
+        padding: "6px 14px",
+        fontSize: 14,
+        background: a.mode === m ? (m === "real" ? "var(--loss)" : "var(--accent)") : "transparent",
+        color: a.mode === m ? (m === "real" ? "#fff" : "#14171c") : "var(--text)",
+      }}
+      onClick={() => (a.mode === m ? setWant(null) : setWant(m))}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div style={{ display: "grid", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="muted" style={{ fontSize: 14 }}>Счёт:</span>
+        {seg("demo", "Демо")}
+        {seg("real", "Реальный")}
+      </div>
+      {want && !a.keys[want] ? (
+        <AddWizard ip={ip} accountId={a.id} fixedMode={want} onDone={() => { setWant(null); reload(); }} />
+      ) : null}
+      {want === "demo" && a.keys.demo ? (
+        <div className="card">
+          <p style={{ fontSize: 14 }}>
+            Перейти на демо-счёт? Если идёт торговля, движок закроет позиции на реальном счёте и продолжит на демо.
+          </p>
+          {error ? <p className="err">{error}</p> : null}
+          <button className="btn" disabled={busy} onClick={() => run(async () => { await api(`/accounts/${a.id}/mode`, { mode: "demo" }); setWant(null); reload(); })}>
+            Перейти на демо
+          </button>
+        </div>
+      ) : null}
+      {want === "real" && a.keys.real ? (
+        !realAllowed ? (
+          <p className="err">Торговля на реальном счёте пока выключена владельцем сервиса. Ключ подключён — переход станет доступен, когда её включат.</p>
+        ) : (
+          <form
+            className="card form"
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              const f = new FormData(ev.currentTarget);
+              run(async () => {
+                await api(`/accounts/${a.id}/mode`, {
+                  mode: "real",
+                  confirm_risk: f.get("confirm") === "on",
+                  capital_usd: Number(f.get("capital_usd")),
+                  daily_loss_pct: Number(f.get("daily_loss_pct")),
+                  code: String(f.get("code")).replace(/\s/g, ""),
+                });
+                setWant(null);
+                reload();
+              });
+            }}
+          >
+            <h3 style={{ color: "var(--loss)", margin: 0 }}>Переход на реальные деньги</h3>
+            <p style={{ fontSize: 14, margin: 0 }}>
+              Баланс реального счёта: <span className="mono">{money(a.keys.real.equity_usd)}</span>. Если идёт
+              торговля, движок сначала закроет позиции на демо и только потом начнёт на реальном.
+            </p>
+            <label>
+              Лимит депозита — сколько отдать стратегии, USD
+              <input name="capital_usd" type="number" min={50} step={50} required defaultValue={100} />
+            </label>
+            <label>
+              Дневной лимит убытка, % от лимита депозита
+              <input name="daily_loss_pct" type="number" min={0.5} max={20} step={0.5} required defaultValue={2} />
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: "var(--text)" }}>
+              <input type="checkbox" name="confirm" style={{ marginTop: 4 }} />
+              <span>
+                Понимаю: деньги настоящие, можно потерять весь лимит депозита; прибыль не гарантирована; результаты
+                на истории и на демо не обещают будущих.
+              </span>
+            </label>
+            <label>
+              Свежий код 2FA
+              <input className="code-input" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} required />
+            </label>
+            {error ? <p className="err">{error}</p> : null}
+            <button className="btn" disabled={busy} style={{ background: "var(--loss)", color: "#fff" }}>
+              Перейти на реальный счёт
+            </button>
+          </form>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function AccountCard({ a, ip, realAllowed, reload }: { a: Account; ip: string; realAllowed: boolean; reload: () => void }) {
   const { busy, error, run } = useSubmit();
   return (
     <div className="card" style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>{a.name}</h3>
-        <span className="pill">{a.mode === "demo" ? "демо" : "реальный"}</span>
+        <span className="pill" style={a.mode === "real" ? { borderColor: "var(--loss)", color: "var(--loss)" } : undefined}>
+          {a.mode === "demo" ? "демо" : "реальный счёт"}
+        </span>
       </div>
       <div style={{ fontSize: 14, display: "grid", gap: 4 }}>
         <div>
@@ -427,6 +556,7 @@ function AccountCard({ a, reload }: { a: Account; reload: () => void }) {
           </div>
         ))}
       </div>
+      <ModeSwitch a={a} ip={ip} realAllowed={realAllowed} reload={reload} />
       <TradingSettings a={a} reload={reload} />
       <EnginePanel a={a} />
       {error ? <p className="err">{error}</p> : null}
@@ -467,6 +597,7 @@ export default function AccountsPage() {
   const [ip, setIp] = useState("");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [adding, setAdding] = useState(false);
+  const [realAllowed, setRealAllowed] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -475,10 +606,11 @@ export default function AccountsPage() {
       setMe(m);
       const [list, status] = await Promise.all([
         api<Account[]>("/accounts"),
-        api<{ server_ip: string }>("/status"),
+        api<{ server_ip: string; real_trading_allowed: boolean }>("/status"),
       ]);
       setAccounts(list);
       setIp(status.server_ip);
+      setRealAllowed(status.real_trading_allowed);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/login");
     }
@@ -509,7 +641,7 @@ export default function AccountsPage() {
           {accounts.length ? (
             <div className="grid" style={{ marginBottom: 24 }}>
               {accounts.map((a) => (
-                <AccountCard key={a.id} a={a} reload={load} />
+                <AccountCard key={a.id} a={a} ip={ip} realAllowed={realAllowed} reload={load} />
               ))}
             </div>
           ) : (

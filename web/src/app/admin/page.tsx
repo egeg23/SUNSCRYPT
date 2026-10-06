@@ -101,6 +101,39 @@ export default function AdminPage() {
       </section>
 
       <section>
+        <h2>Реальная торговля</h2>
+        <form
+          className="card form"
+          style={{ maxWidth: 560 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            const enable = !flags.real_trading_enabled;
+            if (enable && !confirm("Разрешить торговлю на реальные деньги? Каждый пользователь всё равно переключает свой кабинет сам, с кодом 2FA и лимитами.")) return;
+            run(async () => {
+              setFlags(await api<Record<string, boolean>>("/admin/real-trading", { enabled: enable, code: String(f.get("code")) }));
+              e.currentTarget?.reset();
+            });
+          }}
+        >
+          <p style={{ fontSize: 14, margin: 0 }}>
+            Сейчас: <b style={{ color: flags.real_trading_enabled ? "var(--loss)" : "var(--gain)" }}>
+              {flags.real_trading_enabled ? "разрешена" : "выключена (только демо)"}
+            </b>
+            . Бриф: реальные деньги — только после 4–6 недель на демо и проверки стратегии на данных, которых она
+            не видела, после комиссий.
+          </p>
+          <label>
+            Код 2FA
+            <input className="code-input" name="code" inputMode="numeric" pattern="\d{6}" maxLength={6} required />
+          </label>
+          <button className="btn ghost" disabled={busy}>
+            {flags.real_trading_enabled ? "Выключить реальную торговлю" : "Разрешить реальную торговлю"}
+          </button>
+        </form>
+      </section>
+
+      <section>
         <h2>Пригласить</h2>
         <p className="muted" style={{ fontSize: 14, maxWidth: 640 }}>
           Доступ только по приглашению. Ссылка одноразовая, действует 7 дней. Отправьте её

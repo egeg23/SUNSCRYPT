@@ -25,7 +25,7 @@ async def main() -> None:
             f"▸ Кабинетов: {len(accounts)}, с торговлей: {sum(a.trading_enabled for a in accounts)}"
         )
         for a in accounts:
-            tag = f"{str(a.id)[:8]} {a.mode}"
+            tag = f"{str(a.id)[:8]} {a.mode}"  # mode — активный счёт
             raw = await redis.get(f"hb:acct:{a.id}")
             h = json.loads(raw) if raw else None
             n = await db.scalar(

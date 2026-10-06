@@ -151,7 +151,7 @@ async def _take_token(db: AsyncSession, token: str, purpose: str) -> EmailToken:
     return row
 
 
-def _totp_check(user: User, code: str) -> bool:
+def check_totp(user: User, code: str) -> bool:
     """Проверка кода с окном ±30 с и защитой от повторного использования."""
     if not user.totp_secret_enc:
         return False
@@ -365,7 +365,7 @@ async def verify_2fa(body: CodeIn, cur: CurrentAny, request: Request, db: Db) ->
     await enforce(f"2fa:user:{cur.user.id}", 8, 900)
     if not cur.user.totp_enabled_at:
         raise HTTPException(400, "2FA не включена")
-    ok = _totp_check(cur.user, body.code)
+    ok = check_totp(cur.user, body.code)
     await _log(
         db,
         request,
@@ -444,7 +444,7 @@ async def enable_2fa(body: CodeIn, cur: CurrentUser, request: Request, db: Db) -
     await enforce(f"2fa:user:{cur.user.id}", 8, 900)
     if cur.user.totp_enabled_at:
         raise HTTPException(409, "2FA уже включена")
-    if not _totp_check(cur.user, body.code):
+    if not check_totp(cur.user, body.code):
         await db.commit()
         raise HTTPException(400, "Неверный код — проверьте время на телефоне и попробуйте снова")
     cur.user.totp_enabled_at = _now()

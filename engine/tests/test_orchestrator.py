@@ -63,18 +63,22 @@ def fake_bybit(monkeypatch):
     yield r
 
 
-def make_account(db, enabled=True) -> str:
+def make_account(db, enabled=True, real_key=False) -> str:
     uid, aid = uuid.uuid4(), uuid.uuid4()
     with db.begin() as c:
         c.execute(text("INSERT INTO users (id, email, password_hash, is_admin) VALUES (:i, :e, 'x', false)"),
                   {"i": uid, "e": f"{uid.hex[:8]}@example.com"})
         c.execute(text(
-            "INSERT INTO exchange_accounts (id, user_id, name, mode, api_key_enc, api_secret_enc, key_tail, "
-            "permissions, ips, warnings, status, trading_enabled, leverage, daily_loss_pct) VALUES "
-            "(:a, :u, 'Демо', 'demo', :k, :s, 'abcd', '{}', '[]', '[]', 'ok', :en, 1, 5)"),
-            {"a": aid, "u": uid, "en": enabled,
-             "k": crypto.encrypt(b"GOODkey123456", KEY_PURPOSE),
-             "s": crypto.encrypt(b"secret1234567", SECRET_PURPOSE)})
+            "INSERT INTO exchange_accounts (id, user_id, name, mode, status, trading_enabled, leverage, "
+            "daily_loss_pct) VALUES (:a, :u, 'Демо', 'demo', 'ok', :en, 1, 5)"),
+            {"a": aid, "u": uid, "en": enabled})
+        for mode in ("demo", "real") if real_key else ("demo",):
+            c.execute(text(
+                "INSERT INTO account_keys (id, account_id, mode, api_key_enc, api_secret_enc, key_tail, "
+                "permissions, ips, warnings, status) VALUES (:id, :a, :m, :k, :s, :t, '{}', '[]', '[]', 'ok')"),
+                {"id": uuid.uuid4(), "a": aid, "m": mode, "t": mode[:4],
+                 "k": crypto.encrypt(f"GOOD{mode}key12345".encode(), KEY_PURPOSE),
+                 "s": crypto.encrypt(b"secret1234567", SECRET_PURPOSE)})
     return str(aid)
 
 
@@ -101,12 +105,12 @@ def test_start_journal_wind_down(db, fake_bybit):
             c.execute(text("UPDATE exchange_accounts SET trading_enabled = false WHERE id = :a"), {"a": aid})
         await ticks(o, 4)
         assert fake_bybit.get(f"stop:acct:{aid}") == b"1"
-        assert pr.p.returncode is not None
+        assert pr.p is None  # погашен намеренно
         # Сверка: у Bybit две сделки, одна уже в журнале — дописывается вторая.
         with db.begin() as c:
             c.execute(text("UPDATE exchange_accounts SET trading_enabled = true WHERE id = :a"), {"a": aid})
         EXECS[:] = [
-            {"execId": f"exec-{aid[:6]}-1", "symbol": "BTCUSDT", "side": "Buy", "execQty": "0.01",
+            {"execId": f"exec-{aid[:6]}-demo", "symbol": "BTCUSDT", "side": "Buy", "execQty": "0.01",
              "execPrice": "80000", "execFee": "0.16", "execTime": "1790000000000", "execType": "Trade",
              "isMaker": True},
             {"execId": "missing-1", "symbol": "BTCUSDT", "side": "Sell", "execQty": "0.01",
@@ -158,3 +162,46 @@ def test_global_stop_mirrored(db, fake_bybit):
     finally:
         with db.begin() as c:
             c.execute(text("UPDATE system_flags SET value = false WHERE key = 'global_stop'"))
+
+
+def test_switch_demo_to_real_flattens_first_no_double_positions(db, fake_bybit):
+    aid = make_account(db, real_key=True)
+    with db.begin() as c:
+        c.execute(text("UPDATE system_flags SET value = true WHERE key = 'real_trading_enabled'"))
+    try:
+        async def scenario():
+            o = orch.Orchestrator()
+            await ticks(o, 3)
+            assert o.procs[aid].mode == "demo"
+            with db.begin() as c:
+                c.execute(text("UPDATE exchange_accounts SET mode = 'real' WHERE id = :a"), {"a": aid})
+            await ticks(o, 8)
+            assert o.procs[aid].mode == "real" and o.procs[aid].p.returncode is None
+            for p in o.procs.values():
+                if p.p and p.p.returncode is None:
+                    p.p.kill()
+
+        asyncio.run(scenario())
+    finally:
+        with db.begin() as c:
+            c.execute(text("UPDATE system_flags SET value = false WHERE key = 'real_trading_enabled'"))
+    log = [x.decode() for x in fake_bybit.lrange("fake:log", 0, -1)]
+    assert log[:3] == ["start:demo", "flat:demo", "start:real"], log
+    assert "ДВА ПРОЦЕССА" not in log
+    with db.connect() as c:
+        modes = sorted(m for (m,) in c.execute(text("SELECT mode FROM trades WHERE account_id = :a"), {"a": aid}))
+        kinds = [k for (k,) in c.execute(text("SELECT kind FROM engine_events WHERE account_id = :a"), {"a": aid})]
+    assert modes == ["demo", "real"] and "crash" not in kinds
+
+
+def test_real_blocked_without_owner_flag(db, fake_bybit):
+    aid = make_account(db, real_key=True)
+    with db.begin() as c:
+        c.execute(text("UPDATE exchange_accounts SET mode = 'real' WHERE id = :a"), {"a": aid})
+
+    async def scenario():
+        o = orch.Orchestrator()
+        await ticks(o, 2)
+        assert aid not in o.procs or o.procs[aid].p is None
+
+    asyncio.run(scenario())

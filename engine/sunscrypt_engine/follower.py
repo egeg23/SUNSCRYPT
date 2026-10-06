@@ -43,6 +43,7 @@ class FollowerConfig(StrategyConfig):
         leverage: float = 1.0,
         daily_loss_pct: float = 5.0,
         execution: str = "maker",
+        mode: str = "demo",
         **_kw: object,
     ) -> None:
         super().__init__()
@@ -55,6 +56,7 @@ class FollowerConfig(StrategyConfig):
         self.leverage = leverage
         self.daily_loss_usd = capital_usd * daily_loss_pct / 100
         self.execution = execution
+        self.mode = mode
 
 
 def sym_of(iid) -> str:
@@ -96,6 +98,7 @@ class FollowerStrategy(Strategy):
             "fee_ccy": str(ev.commission.currency) if ev.commission else "",
             "liquidity": str(ev.liquidity_side),
             "ts": str(ev.ts_event // 1_000_000),
+            "mode": self.cfg.mode,
         }
         self.r.xadd(keys.FILLS.format(id=self.cfg.account_id), fill, maxlen=50000, approximate=True)
 

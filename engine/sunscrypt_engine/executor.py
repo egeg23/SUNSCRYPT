@@ -78,6 +78,7 @@ def build() -> LiveNode:
                 leverage=float(os.environ.get("SUNS_LEVERAGE", "1")),
                 daily_loss_pct=float(os.environ.get("SUNS_DAILY_LOSS_PCT", "5")),
                 execution=os.environ.get("SUNS_EXECUTION", "maker"),
+                mode=os.environ.get("SUNS_MODE", "demo"),
             )
         )
     )

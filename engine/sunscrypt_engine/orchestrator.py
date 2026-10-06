@@ -36,7 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app import bybit, safety
-from app.accounts import keys_of
+from app.accounts import active_secrets, keys_map, secrets_of
 from app.cache import redis
 from app.db import SessionLocal, read_flags
 from app.models import EngineEvent, EquitySnapshot, ExchangeAccount, Trade
@@ -61,12 +61,14 @@ class Proc:
     next_try: float = 0.0
     stopping_since: float | None = None
     fingerprint: str = ""
+    mode: str = ""  # счёт, на котором работает процесс
     log_task: asyncio.Task | None = field(default=None, repr=False)
 
 
 class Orchestrator:
     def __init__(self) -> None:
         self.procs: dict[str, Proc] = {}
+        self.key_tails: dict[str, str] = {}  # ключ активного счёта сменился — перезапуск
         self.last_equity = 0.0
         self.last_recon = 0.0
 
@@ -79,7 +81,7 @@ class Orchestrator:
 
     # ── процессы ────────────────────────────────────────────────────────────
     def _fingerprint(self, a: ExchangeAccount, capital: float) -> str:
-        return f"{a.mode}|{a.leverage}|{capital}|{a.daily_loss_pct}|{PAIRS}"
+        return f"{a.mode}|{a.leverage}|{capital}|{a.daily_loss_pct}|{PAIRS}|{self.key_tails.get(str(a.id))}"
 
     async def _capital(self, a: ExchangeAccount) -> float:
         if a.capital_usd:
@@ -92,7 +94,8 @@ class Orchestrator:
         pr = self.procs.setdefault(aid, Proc())
         if time.time() < pr.next_try:
             return
-        key, secret = keys_of(a)
+        async with SessionLocal() as db:
+            key, secret = await active_secrets(db, a)
         capital = await self._capital(a)
         await self._set_leverage(a, key, secret)
         env = {
@@ -115,6 +118,7 @@ class Orchestrator:
         )
         pr.started, pr.stopping_since = time.time(), None
         pr.fingerprint = self._fingerprint(a, capital)
+        pr.mode = a.mode
         pr.log_task = asyncio.create_task(self._pipe_log(aid, pr.p))
         await self.event(a.id, "start", f"Исполнитель запущен: {a.mode}, капитал {capital:.0f} USD, "
                                          f"плечо {a.leverage}×, пары {PAIRS}")
@@ -135,6 +139,8 @@ class Orchestrator:
             await asyncio.wait_for(pr.p.wait(), 60)
         except TimeoutError:
             pr.p.kill()
+            await pr.p.wait()
+        pr.p = None  # остановлен намеренно — не падение
         await self.event(aid, "exit", f"Исполнитель остановлен: {reason}")
 
     async def _set_leverage(self, a: ExchangeAccount, key: str, secret: str) -> None:
@@ -175,11 +181,20 @@ class Orchestrator:
             a.trading_enabled and a.status == "ok" and not a.stopped and not global_stop
             and (a.mode == "demo" or real_ok)
         )
+        async with SessionLocal() as db:
+            k = (await keys_map(db, a.id)).get(a.mode)
+        self.key_tails[aid] = k.key_tail if k else ""
         pr = self.procs.get(aid)
         alive = pr is not None and pr.p is not None and pr.p.returncode is None
         if not want:
             if alive:
                 await self._wind_down(a, pr)
+            return
+        if alive and pr.mode != a.mode:
+            # Смена демо ↔ реальный: позиции на прежнем счёте закрываются, и
+            # только после этого исполнитель запускается на новом — двойных
+            # позиций нет (бриф, этап 5).
+            await self._wind_down(a, pr, f"смена счёта: {pr.mode} → {a.mode}")
             return
         if alive and pr.fingerprint != self._fingerprint(a, await self._capital(a)):
             await self.kill(aid, "изменились настройки — перезапуск")
@@ -196,7 +211,7 @@ class Orchestrator:
                 return
             await self.start(a, real_ok)
 
-    async def _wind_down(self, a: ExchangeAccount, pr: Proc) -> None:
+    async def _wind_down(self, a: ExchangeAccount, pr: Proc, why: str | None = None) -> None:
         """Сначала исполнитель закрывает позиции по флагу, потом процесс гасится."""
         aid = str(a.id)
         await redis.set(keys.STOP_ACCOUNT.format(id=aid), "1")
@@ -206,7 +221,7 @@ class Orchestrator:
         hb = json.loads(raw) if raw else {}
         flat = hb.get("halted") and not hb.get("positions") and not hb.get("open_orders")
         if flat or time.time() - pr.stopping_since > STOP_GRACE_SECS:
-            reason = "остановлен" if a.stopped else "торговля выключена"
+            reason = why or ("остановлен" if a.stopped else "торговля выключена")
             await self.kill(aid, reason if flat else f"{reason}; позиции не подтвердили закрытие за 3 мин")
 
     async def _health(self, a: ExchangeAccount, pr: Proc) -> None:
@@ -229,7 +244,7 @@ class Orchestrator:
             for _id, f in entries:
                 f = {k.decode(): v.decode() for k, v in f.items()}
                 rows.append(dict(
-                    account_id=aid, trade_id=f["trade_id"], order_id=f.get("venue_order_id"),
+                    account_id=aid, mode=f.get("mode", "demo"), trade_id=f["trade_id"], order_id=f.get("venue_order_id"),
                     sym=f["sym"], side=f["side"], qty=float(f["qty"]), price=float(f["price"]),
                     fee=float(f["fee"] or 0), fee_ccy=f.get("fee_ccy"), liquidity=f.get("liquidity"),
                     source="engine", ts=datetime.fromtimestamp(int(f["ts"]) / 1000, UTC),
@@ -245,14 +260,14 @@ class Orchestrator:
             now = datetime.now(UTC).replace(second=0, microsecond=0)
             for a in accounts:
                 try:
-                    key, secret = keys_of(a)
+                    key, secret = await active_secrets(db, a)
                     eq = await bybit.equity(a.mode, key, secret)  # type: ignore[arg-type]
                 except (bybit.BybitError, ValueError):
                     continue
                 if eq is not None:
                     a.equity_usd = eq
                     await db.execute(insert(EquitySnapshot).values(
-                        account_id=a.id, ts=now, equity_usd=eq).on_conflict_do_nothing())
+                        account_id=a.id, mode=a.mode, ts=now, equity_usd=eq).on_conflict_do_nothing())
             await db.commit()
 
     async def reconcile(self) -> None:
@@ -262,20 +277,20 @@ class Orchestrator:
             accounts = list(await db.scalars(select(ExchangeAccount).where(ExchangeAccount.trading_enabled)))
             for a in accounts:
                 try:
-                    key, secret = keys_of(a)
+                    key, secret = await active_secrets(db, a)
                 except ValueError:
                     continue
                 execs = await fetch_executions(a.mode, key, secret, since)
                 if execs is None:
                     continue
-                ours = set(await db.scalars(
-                    select(Trade.trade_id).where(Trade.account_id == a.id, Trade.ts >= since)))
+                ours = set(await db.scalars(select(Trade.trade_id).where(
+                    Trade.account_id == a.id, Trade.mode == a.mode, Trade.ts >= since)))
                 missing = [e for e in execs if e["execId"] not in ours]
                 theirs = {e["execId"] for e in execs}
                 extra = [t for t in ours if t not in theirs]
                 for e in missing:
                     await db.execute(insert(Trade).values(
-                        account_id=a.id, trade_id=e["execId"], order_id=e.get("orderId"),
+                        account_id=a.id, mode=a.mode, trade_id=e["execId"], order_id=e.get("orderId"),
                         sym=e["symbol"], side=e["side"].lower(), qty=float(e["execQty"]),
                         price=float(e["execPrice"]), fee=float(e.get("execFee") or 0), fee_ccy="USDT",
                         liquidity="MAKER" if e.get("isMaker") else "TAKER", source="reconcile",

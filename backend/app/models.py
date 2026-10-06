@@ -134,9 +134,9 @@ class Invite(Base):
 
 
 class ExchangeAccount(Base):
-    """Кабинет Bybit пользователя. Ключ и секрет — только шифрованно
-    (AES-GCM, мастер-ключ); в интерфейс не возвращаются — видны лишь
-    последние 4 символа ключа."""
+    """Кабинет Bybit. У кабинета до двух ключей — демо и реальный
+    (AccountKey); торговля идёт на одном, активном (mode). По умолчанию —
+    демо. status и equity_usd — состояние активного ключа."""
 
     __tablename__ = "exchange_accounts"
 
@@ -145,6 +145,32 @@ class ExchangeAccount(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(60))
+    mode: Mapped[str] = mapped_column(String(8))  # активный счёт: demo | real
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok | error | nokey
+    equity_usd: Mapped[float | None] = mapped_column(Float)
+    # Аварийная остановка кабинета (бриф, правило 4); используется движком.
+    stopped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Торговля: включает пользователь; по умолчанию выключена.
+    trading_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    leverage: Mapped[float] = mapped_column(Float, default=1.0, server_default="1")
+    # Капитал под стратегию, USD (для реального счёта — лимит депозита);
+    # пусто — min(баланс, 1000).
+    capital_usd: Mapped[float | None] = mapped_column(Float)
+    daily_loss_pct: Mapped[float] = mapped_column(Float, default=5.0, server_default="5")
+    created_at: Mapped[datetime] = _now_col()
+
+
+class AccountKey(Base):
+    """API-ключ кабинета для одного счёта (демо или реальный). Ключ и секрет —
+    только шифрованно (AES-GCM, мастер-ключ); наружу — последние 4 символа."""
+
+    __tablename__ = "account_keys"
+    __table_args__ = (UniqueConstraint("account_id", "mode"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("exchange_accounts.id", ondelete="CASCADE"), index=True
+    )
     mode: Mapped[str] = mapped_column(String(8))  # demo | real
     api_key_enc: Mapped[bytes] = mapped_column(LargeBinary)
     api_secret_enc: Mapped[bytes] = mapped_column(LargeBinary)
@@ -155,14 +181,6 @@ class ExchangeAccount(Base):
     status: Mapped[str] = mapped_column(String(16), default="ok")  # ok | error
     status_detail: Mapped[str | None] = mapped_column(String(255))
     equity_usd: Mapped[float | None] = mapped_column(Float)
-    # Аварийная остановка кабинета (бриф, правило 4); используется движком.
-    stopped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    # Торговля: включает пользователь; по умолчанию выключена.
-    trading_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    leverage: Mapped[float] = mapped_column(Float, default=1.0, server_default="1")
-    # Капитал под стратегию, USD; пусто — min(баланс, 1000).
-    capital_usd: Mapped[float | None] = mapped_column(Float)
-    daily_loss_pct: Mapped[float] = mapped_column(Float, default=5.0, server_default="5")
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_col()
 
@@ -177,6 +195,7 @@ class Trade(Base):
     account_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("exchange_accounts.id", ondelete="CASCADE"), index=True
     )
+    mode: Mapped[str] = mapped_column(String(8), default="demo", server_default="demo")
     trade_id: Mapped[str] = mapped_column(String(80))  # execId Bybit
     order_id: Mapped[str | None] = mapped_column(String(80))
     sym: Mapped[str] = mapped_column(String(20))
@@ -196,6 +215,7 @@ class EquitySnapshot(Base):
     account_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("exchange_accounts.id", ondelete="CASCADE"), primary_key=True
     )
+    mode: Mapped[str] = mapped_column(String(8), primary_key=True, default="demo")
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     equity_usd: Mapped[float] = mapped_column(Float)
 

@@ -52,7 +52,7 @@ def test_demo_key_passes_and_never_leaks(client, db, caplog):
 
     with db.connect() as c:
         row = c.execute(
-            text("SELECT api_key_enc, api_secret_enc FROM exchange_accounts WHERE id = :i"),
+            text("SELECT api_key_enc, api_secret_enc FROM account_keys WHERE account_id = :i"),
             {"i": acc["id"]},
         ).one()
     assert GOOD_KEY.encode() not in bytes(row[0]) and GOOD_SECRET.encode() not in bytes(row[1])
@@ -139,3 +139,82 @@ def test_owner_demo_account_from_secrets(client, db, monkeypatch):
     mine = [a for a in client.get("/api/accounts").json() if a["key_tail"] == "0001"]
     assert len(mine) == 1 and mine[0]["trading_enabled"] and mine[0]["mode"] == "demo"
     assert OWNER[0]
+
+
+def _real_flag(db, on: bool):
+    with db.begin() as c:
+        c.execute(
+            text("UPDATE system_flags SET value = :v WHERE key = 'real_trading_enabled'"), {"v": on}
+        )
+
+
+def test_switch_to_real_needs_owner_flag_2fa_risk_and_limits(client, db):
+    import time
+
+    import pyotp
+
+    from tests.helpers import PASSWORD, fresh_email, invite
+
+    # Пользователь со своей 2FA (секрет нужен для свежих кодов).
+    tok = invite(client)
+    email = fresh_email()
+    client.post("/api/auth/register", json={"invite": tok, "email": email, "password": PASSWORD})
+    secret = client.post("/api/auth/2fa/setup").json()["secret"]
+    client.post("/api/auth/2fa/enable", json={"code": pyotp.TOTP(secret).now()})
+
+    acc = add(client).json()
+    assert acc["mode"] == "demo" and acc["keys"]["real"] is None
+    # Реальный ключ — отдельно; ключ демо-счёта на «реальный» не подходит.
+    r = client.post(
+        f"/api/accounts/{acc['id']}/keys",
+        json={"mode": "real", "api_key": "REALk3y1234567", "api_secret": GOOD_SECRET},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["keys"]["real"]["key_tail"] == "4567" and r.json()["mode"] == "demo"
+
+    url = f"/api/accounts/{acc['id']}/mode"
+    full = {"mode": "real", "confirm_risk": True, "capital_usd": 500, "daily_loss_pct": 3}
+    _real_flag(db, False)
+    r = client.post(url, json={**full, "code": pyotp.TOTP(secret).at(time.time() + 30)})
+    assert r.status_code == 400 and "выключена владельцем" in r.text
+
+    _real_flag(db, True)
+    try:
+        assert (
+            "риски"
+            in client.post(url, json={**full, "confirm_risk": False, "code": "123456"}).text
+        )
+        assert (
+            "лимит"
+            in client.post(url, json={"mode": "real", "confirm_risk": True, "code": "123456"}).text
+        )
+        assert "Неверный код" in client.post(url, json={**full, "code": "000000"}).text
+        r = client.post(url, json={**full, "code": pyotp.TOTP(secret).at(time.time() + 30)})
+        assert r.status_code == 200, r.text
+        assert r.json()["mode"] == "real" and r.json()["capital_usd"] == 500
+        # Обратно на демо — без кода.
+        assert client.post(url, json={"mode": "demo"}).json()["mode"] == "demo"
+    finally:
+        _real_flag(db, False)
+    with db.connect() as c:
+        msgs = [
+            m
+            for (m,) in c.execute(
+                text(
+                    "SELECT message FROM engine_events "
+                    "WHERE account_id = :a AND kind = 'mode' ORDER BY id"
+                ),
+                {"a": acc["id"]},
+            )
+        ]
+    assert msgs[0].startswith("Счёт: демо → реальный") and msgs[1].startswith(
+        "Счёт: реальный → демо"
+    )
+
+
+def test_real_trading_switch_is_owner_only(client):
+    user_with_2fa(client)
+    assert (
+        client.post("/api/admin/real-trading", json={"enabled": True, "code": "123456"}).status_code
+        == 403
+    )

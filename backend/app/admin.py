@@ -12,10 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.auth import Current, Db, new_invite, new_reset_link, require_2fa
+from app.auth import Current, Db, check_totp, new_invite, new_reset_link, require_2fa
 from app.cache import redis
 from app.db import read_flags
 from app.models import EngineEvent, Invite, SystemFlag, User
+from app.ratelimit import enforce
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -113,4 +114,31 @@ async def global_stop(body: GlobalStopIn, cur: Admin, db: Db) -> dict[str, bool]
         await redis.set("stop:global", "1" if body.stopped else "0")
     except Exception:  # Redis недоступен — диспетчер подхватит флаг из базы
         log.warning("Redis недоступен")
+    return await read_flags(db)
+
+
+class RealTradingIn(BaseModel):
+    enabled: bool
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+@router.post("/real-trading")
+async def real_trading(body: RealTradingIn, cur: Admin, db: Db) -> dict[str, bool]:
+    """Глобальный выключатель реальной торговли (бриф, этап 5; по умолчанию
+    выключен). Включение — явное решение владельца, со свежим кодом 2FA."""
+    await enforce(f"2fa:user:{cur.user.id}", 8, 900)
+    if not check_totp(cur.user, body.code):
+        await db.commit()
+        raise HTTPException(400, "Неверный код 2FA")
+    flag = await db.get(SystemFlag, "real_trading_enabled")
+    flag.value = body.enabled
+    db.add(
+        EngineEvent(
+            kind="real_trading",
+            message="Реальная торговля включена владельцем"
+            if body.enabled
+            else "Реальная торговля выключена владельцем",
+        )
+    )
+    await db.commit()
     return await read_flags(db)
