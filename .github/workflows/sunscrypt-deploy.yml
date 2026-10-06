@@ -1,15 +1,16 @@
 name: SUNSCRYPT — выкатка
 
-# Каждый пуш в ветку sunscrypt уезжает на наш сервер (тот же, где
-# devuz.studio). Ветка своя, с кодом DevUZ не связана и в main не сливается.
+# Каждый пуш в main репозитория egeg23/SUNSCRYPT уезжает на наш сервер (тот
+# же, где devuz.studio) — после линтеров и тестов.
 #
-# Ключ SSH и адрес сервера — те же секреты репозитория, что у выкатки DevUZ
-# (VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_PORT). Секретов приложения здесь нет:
-# они живут на сервере в /opt/sunscrypt/.env (infra/deploy.sh).
+# Ключ SSH и адрес сервера — секреты репозитория VPS_HOST, VPS_USER,
+# VPS_SSH_KEY, VPS_PORT. Секреты приложения живут на сервере в
+# /opt/sunscrypt/.env (infra/deploy.sh); секреты SUNSCRYPT_* выкатка
+# дописывает туда.
 
 on:
   push:
-    branches: [sunscrypt]
+    branches: [main]
   workflow_dispatch:
 
 # Две выкатки подряд не должны собирать образы наперегонки.
@@ -164,15 +165,18 @@ jobs:
             unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy
             export GIT_TERMINAL_PROMPT=0
             DIR=/opt/sunscrypt
-            REPO=https://github.com/egeg23/DevUZ-perfect-.git
+            REPO=https://github.com/egeg23/SUNSCRYPT.git
             if [ ! -d "$DIR/.git" ]; then
               mkdir -p "$DIR"
               git -C "$DIR" init -q
               git -C "$DIR" remote add origin "$REPO"
             fi
             cd "$DIR"
-            git fetch --depth 1 origin sunscrypt
-            git reset --hard -q origin/sunscrypt
+            # Переезд из ветки sunscrypt репозитория DevUZ-perfect-: .env и
+            # веса (не в git) остаются на месте.
+            git remote set-url origin "$REPO"
+            git fetch --depth 1 origin main
+            git reset --hard -q FETCH_HEAD
             echo "▸ SUNSCRYPT $(git rev-parse --short HEAD)"
             bash infra/deploy.sh
 

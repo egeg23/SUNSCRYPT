@@ -1,0 +1,9 @@
+# NautilusTrader pin. Bump only after `python tools/check_nautilus.py --test` passes for the candidate.
+nautilus_trader==2.0.0rc6
+pandas
+pyarrow
+numpy
+torch          # CPU wheel: pip install --index-url https://download.pytorch.org/whl/cpu torch
+einops
+huggingface_hub
+safetensors

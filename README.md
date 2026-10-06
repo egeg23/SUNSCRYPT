@@ -6,7 +6,7 @@
 
 - Контекст и план — [`docs/BRIEF.md`](docs/BRIEF.md).
 - Правила для разработки — [`CLAUDE.md`](CLAUDE.md).
-- Выкатка: каждый пуш в ветку `sunscrypt` →
+- Выкатка: каждый пуш в `main` →
   [`.github/workflows/sunscrypt-deploy.yml`](.github/workflows/sunscrypt-deploy.yml)
   (линтеры, тесты, сборка образов → выкатка) → наш сервер →
   [`infra/deploy.sh`](infra/deploy.sh).

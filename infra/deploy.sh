@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Выкатка SUNSCRYPT на сервере. Запускается из GitHub Actions по SSH
-# (.github/workflows/sunscrypt-deploy.yml) после каждого пуша в ветку
-# sunscrypt; руками — `bash /opt/sunscrypt/infra/deploy.sh` от root.
+# (.github/workflows/sunscrypt-deploy.yml) после каждого пуша в main
+# репозитория egeg23/SUNSCRYPT; руками — `bash /opt/sunscrypt/infra/deploy.sh` от root.
 #
 # Сервер общий: на нём же devuz.studio, витрина globalex и другие проекты.
 # Поэтому скрипт трогает только своё — проект Docker Compose «sunscrypt»,

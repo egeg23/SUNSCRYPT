@@ -11,3 +11,4 @@ results/preds/
 e2e-failure.png
 ci.env
 models/
+engine/var/
