@@ -10,3 +10,4 @@ STOP_ACCOUNT = "stop:acct:{id}"  # аварийная остановка / вы�
 FILLS = "fills:{id}"  # исполнения кабинета (поток, читает диспетчер)
 DAY_TOTAL = "daytotal:{id}:{day}"  # PnL кабинета за сутки UTC (все процессы)
 DAY_HALT = "dayhalt:{id}:{day}"  # дневной лимит сработал — стоим до конца суток
+LIVE = "live:{id}"  # события кабинета для браузера (pub/sub): fill, hb

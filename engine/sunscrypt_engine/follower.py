@@ -103,6 +103,9 @@ class FollowerStrategy(Strategy):
             "mode": self.cfg.mode,
         }
         self.r.xadd(keys.FILLS.format(id=self.cfg.account_id), fill, maxlen=50000, approximate=True)
+        # Сразу в браузер (дашборд, этап 6): сделка и новое состояние позиций.
+        self.r.publish(keys.LIVE.format(id=self.cfg.account_id), json.dumps({"type": "fill", **fill}))
+        self._heartbeat()
 
     # ── основной цикл ───────────────────────────────────────────────────────
     def _tick(self, _event=None) -> None:
@@ -231,6 +234,7 @@ class FollowerStrategy(Strategy):
             "open_orders": len(self.cache.orders_open()),
         }
         self.r.set(keys.HB_ACCOUNT.format(id=self.cfg.account_id), json.dumps(hb), ex=120)
+        self.r.publish(keys.LIVE.format(id=self.cfg.account_id), json.dumps({"type": "hb", **hb}))
 
 
 def _secs(s: int):

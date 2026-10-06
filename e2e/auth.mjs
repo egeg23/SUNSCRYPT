@@ -3,11 +3,12 @@
 // приглашённый регистрируется по ссылке, включает 2FA, выходит и входит с
 // кодом → владелец выдаёт ссылку сброса пароля → новый пароль работает.
 //
-//   node e2e/auth.mjs http://localhost:3471 <почта владельца> <пароль владельца>
+//   node e2e/auth.mjs http://localhost:3471 <почта владельца> <пароль владельца> "<команда compose>"
+import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { chromium } from "playwright";
 
-const [, , BASE, OWNER_EMAIL, OWNER_PASSWORD] = process.argv;
+const [, , BASE, OWNER_EMAIL, OWNER_PASSWORD, COMPOSE] = process.argv;
 const email = `e2e-${Date.now()}@example.com`;
 const password = "e2e long password 1";
 const GOOD_KEY = "GOODe2eK3y987654";
@@ -150,6 +151,21 @@ try {
   await page.getByText(`••••${GOOD_KEY.slice(-4)}`).waitFor();
   const html = await page.content();
   if (html.includes(GOOD_KEY) || html.includes(GOOD_SECRET)) throw new Error("ключ виден на странице");
+
+  if (COMPOSE) {
+    step("дашборд: сделка из движка видна меньше чем за 2 секунды");
+    const id = await page.evaluate(async () => (await (await fetch("/api/accounts")).json())[0].id);
+    await page.goto(`${BASE}/dashboard`);
+    await page.getByText("в реальном времени").waitFor();
+    const fill = JSON.stringify({ type: "fill", mode: "demo", ts: String(Date.now()), sym: "BTCUSDT", side: "buy",
+      qty: "0.001", price: "80000", fee: "0.016", liquidity: "MAKER", trade_id: "e2e-1" });
+    const [cmd, ...args] = COMPOSE.split(/\s+/);
+    const t0 = Date.now();
+    execFileSync(cmd, [...args, "exec", "-T", "redis", "redis-cli", "PUBLISH", `live:${id}`, fill]);
+    await page.getByText("Новая сделка").waitFor({ timeout: 2000 });
+    console.log(`  сделка на дашборде через ${Date.now() - t0} мс (вместе с запуском redis-cli)`);
+    await page.goto(`${BASE}/accounts`);
+  }
 
   step("кабинет Bybit: остановка и удаление");
   await page.click("text=Аварийная остановка");

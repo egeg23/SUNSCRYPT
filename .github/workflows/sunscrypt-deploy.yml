@@ -163,8 +163,8 @@ jobs:
       - name: Браузер для теста
         working-directory: e2e
         run: npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
-      - name: Владелец → приглашение → регистрация → 2FA → сброс пароля → кабинет Bybit
-        run: node e2e/auth.mjs http://localhost:3471 owner@example.com "ci owner password"
+      - name: Владелец → приглашение → 2FA → сброс пароля → кабинет Bybit → дашборд
+        run: node e2e/auth.mjs http://localhost:3471 owner@example.com "ci owner password" "$COMPOSE"
       - name: Логи при падении
         if: failure()
         run: $COMPOSE logs --tail 100

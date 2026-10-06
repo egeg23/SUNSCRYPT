@@ -39,7 +39,7 @@ from app import bybit, safety
 from app.accounts import active_secrets, keys_map, secrets_of
 from app.cache import redis
 from app.db import SessionLocal, read_flags
-from app.models import EngineEvent, EquitySnapshot, ExchangeAccount, Trade
+from app.models import EngineEvent, EquitySnapshot, ExchangeAccount, Funding, Trade
 from sunscrypt_engine import keys
 
 log = logging.getLogger("orchestrator")
@@ -253,11 +253,18 @@ class Orchestrator:
                 await db.execute(insert(Trade).values(rows).on_conflict_do_nothing())
                 await db.commit()
             await redis.xdel(stream, *[e[0] for e in entries])
+            # Снимок баланса на каждую сделку (бриф, этап 6).
+            await self.snapshot_equity(only=aid, exact=True)
 
-    async def snapshot_equity(self) -> None:
+    async def snapshot_equity(self, only: str | None = None, exact: bool = False) -> None:
         async with SessionLocal() as db:
-            accounts = list(await db.scalars(select(ExchangeAccount).where(ExchangeAccount.trading_enabled)))
-            now = datetime.now(UTC).replace(second=0, microsecond=0)
+            q = select(ExchangeAccount).where(ExchangeAccount.trading_enabled)
+            if only:
+                q = q.where(ExchangeAccount.id == only)
+            accounts = list(await db.scalars(q))
+            now = datetime.now(UTC)
+            if not exact:
+                now = now.replace(second=0, microsecond=0)
             for a in accounts:
                 try:
                     key, secret = await active_secrets(db, a)
@@ -285,6 +292,14 @@ class Orchestrator:
                     continue
                 ours = set(await db.scalars(select(Trade.trade_id).where(
                     Trade.account_id == a.id, Trade.mode == a.mode, Trade.ts >= since)))
+                for e in execs:
+                    if e.get("execType") == "Funding":
+                        await db.execute(insert(Funding).values(
+                            account_id=a.id, mode=a.mode, exec_id=e["execId"], sym=e["symbol"],
+                            amount=float(e.get("execFee") or 0),
+                            ts=datetime.fromtimestamp(int(e["execTime"]) / 1000, UTC),
+                        ).on_conflict_do_nothing())
+                execs = [e for e in execs if e.get("execType") == "Trade"]
                 missing = [e for e in execs if e["execId"] not in ours]
                 theirs = {e["execId"] for e in execs}
                 extra = [t for t in ours if t not in theirs]
@@ -335,7 +350,7 @@ async def fetch_executions(mode, key: str, secret: str, since: datetime) -> list
         if data.get("retCode") != 0:
             return None
         res = data.get("result") or {}
-        out += [e for e in res.get("list", []) if e.get("execType") == "Trade"]
+        out += [e for e in res.get("list", []) if e.get("execType") in ("Trade", "Funding")]
         cursor = res.get("nextPageCursor") or ""
         if not cursor:
             break

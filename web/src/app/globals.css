@@ -115,8 +115,24 @@ code,
 
 .top nav {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 16px;
   font-size: 14px;
+}
+
+@media (max-width: 560px) {
+  .top {
+    flex-wrap: wrap;
+    padding-bottom: 20px;
+  }
+  .top nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .logo {
+    height: 32px;
+  }
 }
 
 .logo {

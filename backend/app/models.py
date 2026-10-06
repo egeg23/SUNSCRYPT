@@ -232,3 +232,20 @@ class EngineEvent(Base):
     kind: Mapped[str] = mapped_column(String(32))
     message: Mapped[str] = mapped_column(String(500))
     ts: Mapped[datetime] = _now_col(index=True)
+
+
+class Funding(Base):
+    """Фандинг по позициям (из сверки с Bybit): amount > 0 — заплачено."""
+
+    __tablename__ = "funding"
+    __table_args__ = (UniqueConstraint("account_id", "exec_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("exchange_accounts.id", ondelete="CASCADE"), index=True
+    )
+    mode: Mapped[str] = mapped_column(String(8))
+    exec_id: Mapped[str] = mapped_column(String(80))
+    sym: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[float] = mapped_column(Float)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))

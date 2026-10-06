@@ -10,6 +10,7 @@
 счёте и только потом запускается на новом — двойных позиций нет.
 Всё, что меняет кабинет, — только с включённой 2FA."""
 
+import asyncio
 import json
 import logging
 import re
@@ -18,14 +19,15 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
-from app import bybit, crypto, safety
+from app import bybit, crypto, safety, stats
 from app.auth import Current, Db, check_totp, require_2fa, require_login
 from app.cache import redis
 from app.db import read_flags
-from app.models import AccountKey, EngineEvent, EquitySnapshot, ExchangeAccount, Trade
+from app.models import AccountKey, EngineEvent, EquitySnapshot, ExchangeAccount, Funding, Trade
 from app.ratelimit import enforce
 
 log = logging.getLogger(__name__)
@@ -400,6 +402,119 @@ async def engine_state(account_id: uuid.UUID, cur: Viewer, db: Db) -> dict:
         ],
         "events": [{"ts": e.ts.isoformat(), "kind": e.kind, "message": e.message} for e in events],
     }
+
+
+@router.get("/{account_id}/dashboard")
+async def dashboard(
+    account_id: uuid.UUID, cur: Viewer, db: Db, mode: Mode | None = None, days: int = 30
+) -> dict:
+    """Дашборд кабинета (этап 6): статистика после комиссий и фандинга,
+    кривая баланса, позиции, последние исполнения."""
+    a = await _own(db, cur, account_id)
+    mode = mode or a.mode  # type: ignore[assignment]
+    since = datetime.now(UTC).timestamp() - min(days, 365) * 86400
+    since_dt = datetime.fromtimestamp(since, UTC)
+    fills = list(
+        await db.scalars(
+            select(Trade)
+            .where(Trade.account_id == a.id, Trade.mode == mode, Trade.ts >= since_dt)
+            .order_by(Trade.ts)
+        )
+    )
+    fund = list(
+        await db.scalars(
+            select(Funding.amount).where(
+                Funding.account_id == a.id, Funding.mode == mode, Funding.ts >= since_dt
+            )
+        )
+    )
+    eq_rows = list(
+        await db.execute(
+            select(EquitySnapshot.ts, EquitySnapshot.equity_usd)
+            .where(
+                EquitySnapshot.account_id == a.id,
+                EquitySnapshot.mode == mode,
+                EquitySnapshot.ts >= since_dt,
+            )
+            .order_by(EquitySnapshot.ts)
+        )
+    )
+    step = max(1, len(eq_rows) // 1500)  # не больше ~1500 точек на графике
+    curve = [[int(ts.timestamp() * 1000), v] for ts, v in eq_rows[::step]]
+    if eq_rows and (not curve or curve[-1][0] != int(eq_rows[-1][0].timestamp() * 1000)):
+        curve.append([int(eq_rows[-1][0].timestamp() * 1000), eq_rows[-1][1]])
+    s = stats.summarize(
+        [
+            {
+                "sym": t.sym,
+                "side": t.side,
+                "qty": t.qty,
+                "price": t.price,
+                "fee": t.fee,
+                "ts": int(t.ts.timestamp() * 1000),
+            }
+            for t in fills
+        ],
+        fund,
+        [v for _, v in eq_rows],
+    )
+    hb = None
+    try:
+        raw = await redis.get(f"hb:acct:{a.id}")
+        hb = json.loads(raw) if raw else None
+    except Exception:  # Redis недоступен — диспетчер подхватит флаг из базы
+        log.warning("Redis недоступен")
+    return {
+        "mode": mode,
+        "stats": s,
+        "equity": curve,
+        "heartbeat": hb if a.mode == mode else None,
+        "fills": [
+            {
+                "ts": int(t.ts.timestamp() * 1000),
+                "sym": t.sym,
+                "side": t.side,
+                "qty": t.qty,
+                "price": t.price,
+                "fee": t.fee,
+                "liquidity": t.liquidity,
+            }
+            for t in reversed(fills[-100:])
+        ],
+    }
+
+
+@router.get("/{account_id}/live")
+async def live(account_id: uuid.UUID, cur: Viewer, db: Db) -> StreamingResponse:
+    """Поток событий кабинета (SSE): исполнения и сердцебиение исполнителя —
+    прямо из движка, без опроса. Сделка видна в браузере за доли секунды."""
+    a = await _own(db, cur, account_id)
+    channel = f"live:{a.id}"
+
+    async def gen():
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(channel)
+        try:
+            yield "retry: 3000\n\n"
+            while True:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15)
+                if msg is None:
+                    yield ": ping\n\n"  # держим соединение
+                    continue
+                data = msg["data"].decode() if isinstance(msg["data"], bytes) else msg["data"]
+                kind = json.loads(data).get("type", "message")
+                yield f"event: {kind}\ndata: {data}\n\n"
+        except asyncio.CancelledError:
+            raise
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.delete("/{account_id}")

@@ -116,6 +116,8 @@ def test_start_journal_wind_down(db, fake_bybit):
             {"execId": "missing-1", "symbol": "BTCUSDT", "side": "Sell", "execQty": "0.01",
              "execPrice": "80100", "execFee": "0.44", "execTime": "1790000600000", "execType": "Trade",
              "isMaker": False},
+            {"execId": "fund-1", "symbol": "BTCUSDT", "side": "Buy", "execQty": "0.01",
+             "execPrice": "80100", "execFee": "0.08", "execTime": "1790000700000", "execType": "Funding"},
         ]
         with db.begin() as c:
             c.execute(text("UPDATE trades SET ts = now() WHERE account_id = :a"), {"a": aid})
@@ -131,7 +133,9 @@ def test_start_journal_wind_down(db, fake_bybit):
     with db.connect() as c:
         kinds = [r[0] for r in c.execute(text(
             "SELECT kind FROM engine_events WHERE account_id = :a ORDER BY id"), {"a": aid})]
-        eq = c.execute(text("SELECT equity_usd FROM equity_snapshots WHERE account_id = :a"), {"a": aid}).scalar()
+        eq = c.execute(text("SELECT equity_usd FROM equity_snapshots WHERE account_id = :a LIMIT 1"), {"a": aid}).scalar()
+        fund = c.execute(text("SELECT amount FROM funding WHERE account_id = :a"), {"a": aid}).scalar()
+    assert fund == 0.08
     assert kinds[:2] == ["start", "exit"] and "reconcile" in kinds
     assert eq == 5000
 
