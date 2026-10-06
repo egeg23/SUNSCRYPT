@@ -1,0 +1,13 @@
+.env
+*.env
+!.env.example
+node_modules/
+__pycache__/
+.venv/
+data/
+results/preds/
+*.tar.gz
+*.tar.gz.part*
+e2e-failure.png
+ci.env
+models/

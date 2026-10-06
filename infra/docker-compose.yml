@@ -1,0 +1,99 @@
+# SUNSCRYPT — проект Docker Compose «sunscrypt» на общем сервере.
+#
+# Запускает infra/deploy.sh:
+#   docker compose -p sunscrypt --env-file /opt/sunscrypt/.env -f infra/docker-compose.yml up -d --build
+#
+# Наружу смотрит только gateway, и только на петлевой адрес: в интернет его
+# отдаёт хостовый nginx с сертификатом. У каждого сервиса — потолок памяти:
+# рядом работает devuz.studio, и SUNSCRYPT не должен его вытеснить
+# (сервер: 5 CPU, 7.8 ГБ; здесь в сумме ≈ 1.2 ГБ).
+name: sunscrypt
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3470}:80"
+    volumes:
+      - ./gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [web, backend]
+    mem_limit: 64m
+    logging: *logging
+
+  web:
+    build:
+      context: ../web
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: *logging
+
+  backend:
+    build:
+      context: ../backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://sunscrypt:${POSTGRES_PASSWORD:?нет POSTGRES_PASSWORD}@postgres:5432/sunscrypt
+      REDIS_URL: redis://redis:6379/0
+      MASTER_KEY: ${MASTER_KEY:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      PUBLIC_URL: https://${PUBLIC_HOST:-localhost}
+      # Владелец (секреты SUNSCRYPT_OWNER_*): создаётся при запуске, если его нет.
+      OWNER_EMAIL: ${OWNER_EMAIL:-}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # Почта (секреты SUNSCRYPT_SMTP_* от владельца). Без них письма ждут в
+      # таблице outbox_emails.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-SUNSCRYPT <noreply@localhost>}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    mem_limit: 384m
+    logging: *logging
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sunscrypt
+      POSTGRES_DB: sunscrypt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?нет POSTGRES_PASSWORD}
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=50"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sunscrypt -d sunscrypt"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    shm_size: 128m
+    logging: *logging
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 128m
+    logging: *logging
+
+volumes:
+  pgdata:
+  redisdata:

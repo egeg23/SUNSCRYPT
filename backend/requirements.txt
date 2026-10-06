@@ -1,0 +1,12 @@
+# SUNSCRYPT backend — точные версии; обновлять осознанно.
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+pydantic-settings==2.15.0
+sqlalchemy[asyncio]==2.1.3
+psycopg[binary]==3.3.6
+alembic==1.20.0
+redis==8.1.0
+argon2-cffi==25.1.0
+pyotp==2.10.0
+cryptography==50.0.2
+email-validator==2.3.0
