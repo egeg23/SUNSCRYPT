@@ -135,7 +135,18 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Секреты сервера пока заведены в egeg23/DevUZ-perfect-: выкатку
+      # запускает тамошний workflow sunscrypt-deploy.yml (код берёт отсюда).
+      # Появятся секреты здесь — выкатка пойдёт отсюда сама.
+      - name: Есть ли здесь секреты сервера
+        id: has
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          if [ -n "$VPS_HOST" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::Секретов сервера здесь нет — выкатка запускается из egeg23/DevUZ-perfect- (sunscrypt-deploy.yml)"; fi
       - name: Забрать ветку и запустить infra/deploy.sh по SSH
+        if: steps.has.outputs.ok == 'true'
         uses: appleboy/ssh-action@v1
         env:
           SUNSCRYPT_TELEGRAM_TOKEN: ${{ secrets.SUNSCRYPT_TELEGRAM_TOKEN }}
