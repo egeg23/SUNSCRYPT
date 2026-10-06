@@ -10,6 +10,8 @@ import { chromium } from "playwright";
 const [, , BASE, OWNER_EMAIL, OWNER_PASSWORD] = process.argv;
 const email = `e2e-${Date.now()}@example.com`;
 const password = "e2e long password 1";
+const GOOD_KEY = "GOODe2eK3y987654";
+const GOOD_SECRET = "e2eS3cr3tAbCdEf0123456";
 
 // Ссылки сервис строит на свой публичный адрес — в тесте открываем их на BASE.
 const local = (link) => BASE + new URL(link).pathname + new URL(link).search;
@@ -42,16 +44,26 @@ async function login(who, pass) {
 async function enable2fa() {
   await page.click("text=Включить 2FA");
   const secret = (await page.locator("code").first().textContent()).trim();
-  await page.fill('input[name="code"]', totp(secret));
+  await page.fill('input[name="code"]', await freshCode(secret));
   await page.click("text=Подтвердить и включить");
   await page.getByText("Включена.").waitFor();
   return secret;
 }
 
+// Сервер принимает код шага ±1 от текущего и каждый шаг — один раз.
+const lastStep = new Map();
+const nowStep = () => Math.floor(Date.now() / 30000);
+
+async function freshCode(secret) {
+  const step = Math.max(nowStep(), (lastStep.get(secret) ?? -1) + 1);
+  while (nowStep() < step - 1) await page.waitForTimeout(1000);
+  lastStep.set(secret, step);
+  return totp(secret, step * 30000);
+}
+
 async function codeStep(secret) {
   await page.locator('input[name="code"]').waitFor();
-  // Код следующего шага: текущий уже израсходован.
-  await page.fill('input[name="code"]', totp(secret, Date.now() + 30000));
+  await page.fill('input[name="code"]', await freshCode(secret));
   await page.click("button.btn >> text=Подтвердить");
   await page.waitForURL(`${BASE}/account`);
 }
@@ -118,9 +130,35 @@ try {
   await page.click("text=Сохранить");
   await page.getByText("Пароль изменён").waitFor();
   await login(email, "new e2e password 2");
-  await page.locator('input[name="code"]').waitFor();
+  await codeStep(secret);
 
-  console.log("✓ e2e: закрытый доступ, вход, 2FA и сброс пароля работают");
+  step("кабинет Bybit: ключ с правом вывода отклоняется");
+  await page.goto(`${BASE}/accounts`);
+  await page.click("text=Добавить кабинет");
+  await page.click("text=Демо-счёт · рекомендуем");
+  await page.getByText("109.73.198.185").first().waitFor();
+  await page.fill('input[name="api_key"]', "WITHDRAWk3y123456");
+  await page.fill('input[name="api_secret"]', "s3cr3tWithdraw123456");
+  await page.click("text=Проверить и подключить");
+  await page.getByText("переводы и вывод").waitFor();
+
+  step("кабинет Bybit: демо-ключ проходит, ключ не виден");
+  await page.fill('input[name="api_key"]', GOOD_KEY);
+  await page.fill('input[name="api_secret"]', GOOD_SECRET);
+  await page.click("text=Проверить и подключить");
+  await page.getByText("Ключ в порядке").waitFor();
+  await page.getByText(`••••${GOOD_KEY.slice(-4)}`).waitFor();
+  const html = await page.content();
+  if (html.includes(GOOD_KEY) || html.includes(GOOD_SECRET)) throw new Error("ключ виден на странице");
+
+  step("кабинет Bybit: остановка и удаление");
+  await page.click("text=Остановить");
+  await page.getByText("Остановлен вручную").waitFor();
+  page.once("dialog", (d) => d.accept());
+  await page.click("text=Удалить");
+  await page.getByText("Кабинетов пока нет").waitFor();
+
+  console.log("✓ e2e: закрытый доступ, 2FA, сброс пароля и кабинеты Bybit работают");
 } catch (e) {
   await page.screenshot({ path: "e2e-failure.png", fullPage: true }).catch(() => {});
   console.error("✗ e2e:", e.message);

@@ -47,6 +47,10 @@ services:
       # Владелец (секреты SUNSCRYPT_OWNER_*): создаётся при запуске, если его нет.
       OWNER_EMAIL: ${OWNER_EMAIL:-}
       OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      SERVER_IP: ${SERVER_IP:-109.73.198.185}
+      # Только для сквозного теста CI (учебный Bybit); на сервере — пусто.
+      BYBIT_DEMO_URL: ${BYBIT_DEMO_URL:-https://api-demo.bybit.com}
+      BYBIT_REAL_URL: ${BYBIT_REAL_URL:-https://api.bybit.com}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # Почта (секреты SUNSCRYPT_SMTP_* от владельца). Без них письма ждут в
       # таблице outbox_emails.
@@ -55,6 +59,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-SUNSCRYPT <noreply@localhost>}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

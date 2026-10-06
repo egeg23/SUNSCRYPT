@@ -74,6 +74,10 @@ WEB_PORT="$(env_get WEB_PORT)"
 # maximov-tech.ru». sslip.io отвечает адресом, зашитым в имя, — домен не
 # нужен, а сертификат Let's Encrypt на такое имя выдаётся. Переезд на домен —
 # PUBLIC_HOST в .env и повторная выкатка.
+if [ -z "$(env_get SERVER_IP)" ]; then
+  IP="$(curl -fsS --max-time 10 https://api.ipify.org || hostname -I | awk '{print $1}')"
+  [ -n "$IP" ] && echo "SERVER_IP=$IP" >> "$ENV_FILE"
+fi
 if [ -z "$(env_get PUBLIC_HOST)" ]; then
   IP="$(curl -fsS --max-time 10 https://api.ipify.org || hostname -I | awk '{print $1}')"
   [ -n "$IP" ] || die "Не узнал внешний адрес сервера"
@@ -184,57 +188,15 @@ for url in https://api.bybit.com/v5/market/time https://api-demo.bybit.com/v5/ma
   say "Bybit $url → $code"
 done
 
-# ── 7. Демо-ключ Bybit владельца: работает ли и какие у него права ──────────
-# Ключ и подпись в лог не попадают: только права, IP-привязка и баланс демо.
-# Ключ с правом вывода/переводов — громкое предупреждение (бриф, правило 3).
-if [ -n "$(env_get BYBIT_DEMO_API_KEY)" ] && command -v python3 >/dev/null 2>&1; then
-  BYBIT_KEY="$(env_get BYBIT_DEMO_API_KEY)" BYBIT_SECRET="$(env_get BYBIT_DEMO_API_SECRET)" \
-  python3 - <<'PY' || echo "⚠ проверка демо-ключа Bybit не прошла" >&2
-import hashlib, hmac, json, os, time, urllib.request
-
-key, secret = os.environ["BYBIT_KEY"].strip(), os.environ["BYBIT_SECRET"].strip()
-
-def get(path, query="", host="api-demo.bybit.com"):
-    ts, rw = str(int(time.time() * 1000)), "5000"
-    sign = hmac.new(secret.encode(), (ts + key + rw + query).encode(), hashlib.sha256).hexdigest()
-    req = urllib.request.Request(
-        f"https://{host}{path}" + (f"?{query}" if query else ""),
-        headers={"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts, "X-BAPI-RECV-WINDOW": rw,
-                 "X-BAPI-SIGN": sign},
-    )
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
-
-info = get("/v5/user/query-api")
-if info.get("retCode") != 0:
-    print(f"▸ Демо-ключ Bybit: ошибка {info.get('retCode')} — {info.get('retMsg')}")
-    # Частая ошибка — ключ создан на основном счёте, а не в Demo Trading.
-    # Спрашиваем только сведения о ключе (чтение), ордеров нет.
-    main = get("/v5/user/query-api", host="api.bybit.com")
-    if main.get("retCode") == 0:
-        print("⚠ Это ключ ОСНОВНОГО (реального) счёта, не демо. Для демо нужен ключ, "
-              "созданный в режиме Demo Trading. Реальный ключ сервис сейчас не использует.")
-        r = main["result"]
-        perms = {k: v for k, v in (r.get("permissions") or {}).items() if v}
-        print(f"▸ Права этого ключа: {perms}; IP-привязка: {r.get('ips')}")
-    else:
-        print(f"▸ На основном счёте ключ тоже не принят: {main.get('retMsg')} — "
-              "вероятно, ключ или секрет скопированы с ошибкой")
-    raise SystemExit(0)
-res = info["result"]
-perms = {k: v for k, v in (res.get("permissions") or {}).items() if v}
-danger = {k: v for k, v in perms.items() if k in ("Wallet", "Exchange") or "Withdraw" in str(v)}
-print(f"▸ Демо-ключ Bybit работает. Права: {perms}")
-print(f"▸ Только чтение: {res.get('readOnly') == 1}; IP-привязка: {res.get('ips')}; "
-      f"единый счёт (UTA): {res.get('uta')}")
-if danger:
-    print(f"⚠ У ключа есть права на вывод/переводы: {danger} — такой ключ сервис отклонит")
-bal = get("/v5/account/wallet-balance", "accountType=UNIFIED")
-if bal.get("retCode") == 0 and bal["result"]["list"]:
-    print(f"▸ Демо-баланс: {float(bal['result']['list'][0]['totalEquity'] or 0):,.2f} USD")
-else:
-    print(f"▸ Демо-баланс: не прочитан ({bal.get('retMsg')})")
-PY
+# ── 7. Мастер-ключ и демо-ключ Bybit владельца ──────────────────────────────
+# Перешифровка секретов текущим MASTER_KEY (нужна только после его смены).
+"${COMPOSE[@]}" exec -T backend python -m app.rotate | sed 's/^/▸ Секреты в базе: /' || true
+# Демо-ключ владельца проверяется тем же кодом, что и ключи пользователей
+# (app/bybit.py). Ключ передаётся через stdin, в лог — только итог.
+if [ -n "$(env_get BYBIT_DEMO_API_KEY)" ]; then
+  printf '%s\n%s\n' "$(env_get BYBIT_DEMO_API_KEY)" "$(env_get BYBIT_DEMO_API_SECRET)" \
+    | "${COMPOSE[@]}" exec -T backend python -m app.selfcheck \
+    || echo "⚠ проверка демо-ключа Bybit не прошла" >&2
 fi
 
 SCHEME=http

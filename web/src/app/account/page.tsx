@@ -185,9 +185,10 @@ export default function AccountPage() {
             <div className="card">
               <h3>Кабинеты Bybit</h3>
               <p className="muted" style={{ fontSize: 14 }}>
-                Подключение кабинета по API-ключу (без права вывода, с привязкой к IP сервера) —
-                следующий этап. {me.totp_enabled ? "" : "Для него понадобится 2FA."}
+                Подключение по API-ключу без права вывода, с привязкой к IP сервера.
+                {me.totp_enabled ? "" : " Сначала включите 2FA."}
               </p>
+              <a href="/accounts">Перейти к кабинетам →</a>
             </div>
           </div>
 

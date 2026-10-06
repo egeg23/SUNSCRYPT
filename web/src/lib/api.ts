@@ -3,6 +3,9 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    // Разбор ключа Bybit: что не так и о чём предупредить.
+    public problems: string[] = [],
+    public warnings: string[] = [],
   ) {
     super(message);
   }
@@ -18,6 +21,8 @@ function detail(body: unknown, status: number): string {
     if (field === "password") return "Пароль — не короче 10 символов";
     if (field === "email") return "Проверьте адрес почты";
     if (field === "code") return "Код — 6 цифр";
+    if (field === "api_key" || field === "api_secret")
+      return "Ключ и секрет — только латинские буквы и цифры, без пробелов";
     return "Проверьте введённые данные";
   }
   if (status === 429) return "Слишком много попыток. Подождите и попробуйте снова.";
@@ -36,7 +41,13 @@ export async function api<T = Record<string, unknown>>(
     credentials: "same-origin",
   });
   const data = await r.json().catch(() => null);
-  if (!r.ok) throw new ApiError(r.status, detail(data, r.status));
+  if (!r.ok) {
+    const d = (data as { detail?: { problems?: string[]; warnings?: string[] } } | null)?.detail;
+    if (d && typeof d === "object" && !Array.isArray(d) && d.problems) {
+      throw new ApiError(r.status, d.problems[0] ?? "Ошибка", d.problems, d.warnings ?? []);
+    }
+    throw new ApiError(r.status, detail(data, r.status));
+  }
   return data as T;
 }
 

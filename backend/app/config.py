@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     public_url: str = "http://localhost:3000"
 
     master_key: SecretStr | None = None
+    # Прежний мастер-ключ — только на время смены (см. app/crypto.py).
+    master_key_previous: SecretStr | None = None
+    # Внешний IP сервера: к нему пользователи привязывают ключи Bybit.
+    server_ip: str = "109.73.198.185"
+    # Адреса Bybit. Меняются только в сквозном тесте CI (там Bybit закрыт
+    # гео-блоком и подставляется учебный, e2e/fake_bybit.py).
+    bybit_demo_url: str = "https://api-demo.bybit.com"
+    bybit_real_url: str = "https://api.bybit.com"
     session_secret: SecretStr | None = None
 
     # Владелец: создаётся при запуске, если его ещё нет (секреты

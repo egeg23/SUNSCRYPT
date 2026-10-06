@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("MASTER_KEY", base64.b64encode(os.urandom(32)).decode())
 os.environ.setdefault("DB_NULLPOOL", "1")
 os.environ.setdefault("PUBLIC_URL", "https://sunscrypt.test")
+os.environ.setdefault("SERVER_IP", "109.73.198.185")
 if os.environ.get("SUNSCRYPT_TEST_LIVE") == "1":
     os.environ.setdefault("OWNER_EMAIL", "owner@example.com")
     os.environ.setdefault("OWNER_PASSWORD", "owner long password")

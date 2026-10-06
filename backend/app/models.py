@@ -2,9 +2,11 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     LargeBinary,
     String,
@@ -127,4 +129,32 @@ class Invite(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     used_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _now_col()
+
+
+class ExchangeAccount(Base):
+    """Кабинет Bybit пользователя. Ключ и секрет — только шифрованно
+    (AES-GCM, мастер-ключ); в интерфейс не возвращаются — видны лишь
+    последние 4 символа ключа."""
+
+    __tablename__ = "exchange_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(60))
+    mode: Mapped[str] = mapped_column(String(8))  # demo | real
+    api_key_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    api_secret_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    key_tail: Mapped[str] = mapped_column(String(4))
+    permissions: Mapped[dict] = mapped_column(JSON, default=dict)
+    ips: Mapped[list] = mapped_column(JSON, default=list)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok | error
+    status_detail: Mapped[str | None] = mapped_column(String(255))
+    equity_usd: Mapped[float | None] = mapped_column(Float)
+    # Аварийная остановка кабинета (бриф, правило 4); используется движком.
+    stopped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_col()

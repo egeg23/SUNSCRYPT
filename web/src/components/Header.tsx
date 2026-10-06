@@ -11,7 +11,8 @@ export function Header() {
       </Link>
       <nav>
         <Link href="/brand">Бренд</Link>
-        <Link href="/account">Кабинет</Link>
+        <Link href="/accounts">Bybit</Link>
+        <Link href="/account">Профиль</Link>
       </nav>
     </header>
   );

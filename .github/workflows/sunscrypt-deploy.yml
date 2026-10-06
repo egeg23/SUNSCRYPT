@@ -100,7 +100,11 @@ jobs:
             echo "COOKIE_SECURE=false"
             echo "OWNER_EMAIL=owner@example.com"
             echo "OWNER_PASSWORD=ci owner password"
+            echo "BYBIT_DEMO_URL=http://host.docker.internal:9999"
+            echo "BYBIT_REAL_URL=http://host.docker.internal:9999"
           } > ci.env
+      - name: Учебный Bybit (настоящий из CI закрыт гео-блоком)
+        run: nohup python3 e2e/fake_bybit.py 9999 > /dev/null 2>&1 &
       - name: Сборка и запуск стека
         run: |
           $COMPOSE config -q
@@ -116,7 +120,7 @@ jobs:
       - name: Браузер для теста
         working-directory: e2e
         run: npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
-      - name: Владелец → приглашение → регистрация → 2FA → сброс пароля
+      - name: Владелец → приглашение → регистрация → 2FA → сброс пароля → кабинет Bybit
         run: node e2e/auth.mjs http://localhost:3471 owner@example.com "ci owner password"
       - name: Логи при падении
         if: failure()

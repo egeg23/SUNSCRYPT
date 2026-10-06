@@ -7,10 +7,11 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import admin, auth, safety
+from app import accounts, admin, auth, safety
 from app.cache import redis_alive
 from app.config import get_settings
 from app.db import SessionLocal, db_alive, get_session, read_flags
@@ -34,6 +35,14 @@ app = FastAPI(
 )
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(accounts.router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """Ошибки полей — без введённых значений: в форме могут быть ключи Bybit."""
+    errors = [{"loc": e.get("loc"), "type": e.get("type")} for e in exc.errors()]
+    return JSONResponse({"detail": errors}, status_code=422)
 
 
 @app.middleware("http")
@@ -76,4 +85,6 @@ async def status(flags: Annotated[dict[str, bool], Depends(get_flags)]) -> dict:
         "global_stop": global_stop,
         "max_leverage": safety.MAX_LEVERAGE,
         "default_leverage": safety.DEFAULT_LEVERAGE,
+        # К этому IP пользователи привязывают ключи Bybit.
+        "server_ip": get_settings().server_ip,
     }
