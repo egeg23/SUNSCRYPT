@@ -41,7 +41,14 @@ def at(ts: str) -> float:
 def test_decision_only_on_hth_bar_close():
     assert ss.decision_bar(pd.Timestamp("2026-10-06 16:00"))
     assert not ss.decision_bar(pd.Timestamp("2026-10-06 17:00"))
-    assert service(bars("2026-10-06 17:00")).step("BTCUSDT", at("2026-10-06 17:00:30")) is None
+    # Свеча, закрывающая окно, ещё не пришла — решения нет.
+    assert service(bars("2026-10-06 15:00")).step("BTCUSDT", at("2026-10-06 16:00:30")) is None
+
+
+def test_restart_mid_window_uses_bars_up_to_window_start():
+    svc = service(bars("2026-10-06 22:00"))
+    sig = svc.step("BTCUSDT", at("2026-10-06 22:23"))
+    assert sig["ts_close"] == int(pd.Timestamp("2026-10-06 16:00").value // 1_000_000)
 
 
 def test_signal_published_once_with_backfilled_z():

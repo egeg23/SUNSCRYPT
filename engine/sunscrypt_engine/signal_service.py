@@ -108,14 +108,17 @@ class SignalService:
         if last and json.loads(last)["ts_close"] >= due_ms:
             return None  # решение по последнему окну уже есть — свечи не нужны
         df = self.fetch(sym, BAR_MIN, 1000)
+        # Решение по текущему окну — на свечах ровно до его начала: так же,
+        # как если бы сервис работал в момент закрытия решающей свечи (после
+        # перезапуска посреди окна не надо ждать следующего).
+        bar = pd.Timedelta(minutes=BAR_MIN)
+        df = df[df.index + bar <= pd.Timestamp(due_ms, unit="ms")]
         if len(df) < CONTEXT:
             return None
-        ts_close = df.index[-1] + pd.Timedelta(minutes=BAR_MIN)
+        ts_close = df.index[-1] + bar
         ts_ms = int(ts_close.value // 1_000_000)
-        if last and json.loads(last)["ts_close"] >= ts_ms:
-            return None
-        if not decision_bar(ts_close):
-            return None
+        if ts_ms != due_ms or not decision_bar(ts_close):
+            return None  # свечи до начала окна ещё не пришли
         self.backfill(sym, df.iloc[:-1])
         rhat, pup, sd = self.fc.rhat(df.iloc[-CONTEXT:])
         hist = [h["rhat"] for h in self._hist(sym) if h["ts"] < ts_ms]
