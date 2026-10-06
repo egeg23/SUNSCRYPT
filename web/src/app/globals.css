@@ -1,12 +1,55 @@
+/* SUNSCRYPT tokens. Palette source of truth: brand/build_brand.py */
 :root {
-  --bg: #f7f7f5;
-  --fg: #16181d;
-  --muted: #6b7280;
-  --accent: #e8590c;
-  color-scheme: light dark;
+  --ink: #0d1320;
+  --solar: #ffb21a;
+  --flare: #ff5a36;
+  --dawn: #fff3de;
+  --slate: #7d879a;
+  --up: #1f9d6b;
+  --down: #d93f45;
+
+  --bg: #fbf8f2;
+  --surface: #ffffff;
+  --fg: var(--ink);
+  --muted: #5b6475;
+  --line: #e8e2d6;
+  --accent: #e5520f;
+  --sun: linear-gradient(180deg, var(--solar), var(--flare));
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #0f1115; --fg: #eceef2; --muted: #9aa1ad; }
+  :root:not([data-theme="light"]) {
+    --bg: #0b101b;
+    --surface: #121a2a;
+    --fg: #f3ede2;
+    --muted: #9aa3b4;
+    --line: #222c3f;
+    --accent: #ffb21a;
+    --up: #34c48b;
+    --down: #ff6b6f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b101b;
+  --surface: #121a2a;
+  --fg: #f3ede2;
+  --muted: #9aa3b4;
+  --line: #222c3f;
+  --accent: #ffb21a;
+  --up: #34c48b;
+  --down: #ff6b6f;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+h1, h2, h3 { font-family: var(--font-display), system-ui, sans-serif; line-height: 1.15; text-wrap: balance; margin: 0; }
+.num { font-family: var(--font-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

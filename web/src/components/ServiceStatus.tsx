@@ -15,10 +15,10 @@ export function ServiceStatus() {
       .catch(() => setError(true));
   }, []);
 
-  if (error) return <p data-testid="status">API недоступен</p>;
-  if (!health) return <p data-testid="status">Проверяю сервис…</p>;
+  if (error) return <p data-testid="status" className="num" style={{ color: "var(--muted)", fontSize: 14, margin: 0 }}>API недоступен</p>;
+  if (!health) return <p data-testid="status" className="num" style={{ color: "var(--muted)", fontSize: 14, margin: 0 }}>Проверяю сервис…</p>;
   return (
-    <p data-testid="status">
+    <p data-testid="status" className="num" style={{ color: "var(--muted)", fontSize: 14, margin: 0 }}>
       API {health.version}: {health.status === "ok" ? "работает" : "частично доступен"} · БД{" "}
       {health.db ? "✓" : "✗"} · Redis {health.redis ? "✓" : "✗"}
     </p>
