@@ -80,8 +80,8 @@ class Scripted(FollowerStrategy):
 
 @pytest.fixture
 def run():
-    def _run(script, minutes=240, leverage=1.0, execution="maker"):
-        r = fakeredis.FakeRedis()
+    def _run(script, minutes=240, leverage=1.0, execution="maker", daily_loss_pct=50, r=None):
+        r = r if r is not None else fakeredis.FakeRedis()
         Scripted.script, Scripted.seen = dict(script), []
         engine = BacktestEngine(BacktestEngineConfig(trader_id=TraderId("BT-001")))
         engine.add_venue(venue=Venue("BYBIT"), oms_type=OmsType.NETTING, account_type=AccountType.MARGIN,
@@ -92,7 +92,7 @@ def run():
         engine.add_data(quotes(minutes))
         engine.add_strategy(Scripted(FollowerConfig(
             account_id="a1", instrument_ids=[IID], redis=r, capital_usd=10_000,
-            leverage=leverage, daily_loss_pct=50, execution=execution)))
+            leverage=leverage, daily_loss_pct=daily_loss_pct, execution=execution)))
         engine.run()
         seen = list(Scripted.seen)
         engine.dispose()
@@ -137,3 +137,14 @@ def test_leverage_two_doubles_size_and_three_is_refused(run):
 def test_global_stop(run):
     _, seen = run({1: lambda r: signal(r, 0, +1), 40: lambda r: r.set(keys.STOP_GLOBAL, "1")}, minutes=80)
     assert pos_at(seen, 30) > 0 and pos_at(seen, 70) == 0
+
+
+def test_daily_loss_halt_survives_restart(run):
+    # Лимит 0.01 % от 10 000 = 1 USD: первая же комиссия (≈2 USD) его съедает.
+    r, seen = run({1: lambda r: signal(r, 0, +1)}, minutes=60, daily_loss_pct=0.01)
+    assert max(p for _, p in seen) > 0 and seen[-1][1] == 0  # вошёл, лимит — вышел
+    day = [k for k in r.keys("dayhalt:*")]
+    assert day and "дневной лимит" in r.get(day[0]).decode()
+    # «Перезапуск» в те же сутки: новый процесс, та же Redis — стоит.
+    _, seen2 = run({1: lambda r: signal(r, 0, +1)}, minutes=60, daily_loss_pct=0.01, r=r)
+    assert all(p == 0 for _, p in seen2)

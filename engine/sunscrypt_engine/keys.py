@@ -8,4 +8,5 @@ HB_ACCOUNT = "hb:acct:{id}"  # сердцебиение исполнителя �
 STOP_GLOBAL = "stop:global"  # аварийная остановка всех кабинетов
 STOP_ACCOUNT = "stop:acct:{id}"  # аварийная остановка / выключение кабинета
 FILLS = "fills:{id}"  # исполнения кабинета (поток, читает диспетчер)
-DAY_PNL = "daypnl:{id}:{day}"  # PnL на начало суток UTC — для дневного лимита
+DAY_TOTAL = "daytotal:{id}:{day}"  # PnL кабинета за сутки UTC (все процессы)
+DAY_HALT = "dayhalt:{id}:{day}"  # дневной лимит сработал — стоим до конца суток

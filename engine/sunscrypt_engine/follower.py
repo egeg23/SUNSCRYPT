@@ -69,7 +69,9 @@ class FollowerStrategy(Strategy):
         self.cfg = config
         self.r = config.redis
         self.halted: str | None = None
-        self.loss_day: str | None = None
+        self.day: str | None = None
+        self.day_start_pnl = 0.0
+        self.carry = 0.0
         self.order_born: dict[str, float] = {}  # client_order_id → время постановки
         self.target_since: dict[str, tuple[int, float]] = {}  # sym → (target, с какого момента)
 
@@ -122,22 +124,24 @@ class FollowerStrategy(Strategy):
     def _check_stops(self) -> None:
         aid = self.cfg.account_id
         day = time.strftime("%Y%m%d", time.gmtime(self._now()))
+        pnl = self._pnl()
+        if day != self.day:
+            # Новые сутки или новый процесс: убыток за сутки складывается из
+            # прежних процессов (Redis) и этого — перезапуск его не обнуляет.
+            self.day, self.day_start_pnl = day, pnl
+            self.carry = float(self.r.get(keys.DAY_TOTAL.format(id=aid, day=day)) or 0)
+        day_total = self.carry + pnl - self.day_start_pnl
+        self.r.set(keys.DAY_TOTAL.format(id=aid, day=day), day_total, ex=3 * 86400)
+        halt_key = keys.DAY_HALT.format(id=aid, day=day)
+        if day_total < -self.cfg.daily_loss_usd and not self.r.exists(halt_key):
+            self.r.set(halt_key, f"дневной лимит убытка ({day_total:.2f} USD)", ex=2 * 86400)
         reason = None
         if self.r.get(keys.STOP_GLOBAL) == b"1":
             reason = "общая аварийная остановка"
         elif self.r.get(keys.STOP_ACCOUNT.format(id=aid)) == b"1":
             reason = "кабинет остановлен"
-        elif self.loss_day == day:
-            reason = self.halted  # дневной лимит держится до конца суток UTC
-        else:
-            k = keys.DAY_PNL.format(id=aid, day=day)
-            pnl, start = self._pnl(), self.r.get(k)
-            if start is None:
-                self.r.set(k, pnl, ex=3 * 86400)
-                start = pnl
-            if pnl - float(start) < -self.cfg.daily_loss_usd:
-                reason = f"дневной лимит убытка ({pnl - float(start):.2f} USD)"
-                self.loss_day = day
+        elif (h := self.r.get(halt_key)) is not None:
+            reason = h.decode()  # держится до конца суток UTC, и после перезапуска
         if reason:
             self._halt(reason)
         else:
@@ -222,6 +226,7 @@ class FollowerStrategy(Strategy):
             "ts": int(self._now() * 1000),
             "positions": {k: v for k, v in pos.items() if v},
             "pnl": round(self._pnl(), 4),
+            "day_pnl": round(self.carry + self._pnl() - self.day_start_pnl, 4),
             "halted": self.halted,
             "open_orders": len(self.cache.orders_open()),
         }
