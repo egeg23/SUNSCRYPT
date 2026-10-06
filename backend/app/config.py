@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # перезаписывается — его можно сменить в кабинете.
     owner_email: str | None = None
     owner_password: SecretStr | None = None
+    # Демо-ключ владельца (секреты SUNSCRYPT_BYBIT_DEMO_API_*): из него
+    # заводится демо-кабинет владельца.
+    bybit_demo_api_key: SecretStr | None = None
+    bybit_demo_api_secret: SecretStr | None = None
 
     session_days: int = 30
     cookie_secure: bool = True

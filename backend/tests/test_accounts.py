@@ -104,3 +104,38 @@ def test_stop_delete_and_isolation(client):
     client.cookies.update(mine)
     assert client.delete(f"/api/accounts/{acc['id']}").json() == {"ok": True}
     assert client.get("/api/accounts").json() == []
+
+
+def test_invisible_chars_from_phone_are_cleaned(client):
+    user_with_2fa(client)
+    r = add(client, key="​" + GOOD_KEY + " \n", secret=GOOD_SECRET + "⁠")
+    assert r.status_code == 201, r.text
+    assert r.json()["key_tail"] == GOOD_KEY[-4:]
+
+
+def test_owner_demo_account_from_secrets(client, db, monkeypatch):
+    import asyncio
+
+    from app import accounts
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from tests.helpers import OWNER, owner_login
+
+    owner_login(client)  # владелец существует и вошёл
+    monkeypatch.setenv("BYBIT_DEMO_API_KEY", "GOODowner0001")
+    monkeypatch.setenv("BYBIT_DEMO_API_SECRET", "ownerSecret12345")
+    get_settings.cache_clear()
+    try:
+
+        async def run():
+            async with SessionLocal() as s:
+                await accounts.ensure_owner_demo(s)
+                await accounts.ensure_owner_demo(s)  # второй раз — не дублирует
+
+        asyncio.run(run())
+    finally:
+        get_settings.cache_clear()
+    owner_login(client)
+    mine = [a for a in client.get("/api/accounts").json() if a["key_tail"] == "0001"]
+    assert len(mine) == 1 and mine[0]["trading_enabled"] and mine[0]["mode"] == "demo"
+    assert OWNER[0]

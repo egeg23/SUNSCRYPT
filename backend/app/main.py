@@ -22,6 +22,7 @@ async def lifespan(_: FastAPI):
     try:
         async with SessionLocal() as db:
             await auth.ensure_owner(db)
+            await accounts.ensure_owner_demo(db)
     except Exception as e:  # база ещё не готова — повторим при следующем запуске
         logging.getLogger(__name__).warning("владелец не создан: %s", type(e).__name__)
     yield

@@ -7,12 +7,13 @@
 
 import json
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 
 from app import bybit, crypto, safety
@@ -33,11 +34,20 @@ Viewer = Annotated[Current, Depends(require_login)]
 Owner2FA = Annotated[Current, Depends(require_2fa)]
 
 
+# Пробелы и невидимые символы, которые телефон добавляет при копировании.
+_INVISIBLE = re.compile(r"[\s\u00ad\u200b-\u200f\u2028-\u202f\u2060-\u2064\ufeff]")
+
+
 class AccountIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     mode: Literal["demo", "real"] = "demo"
     api_key: str = Field(min_length=10, max_length=64, pattern=r"^[A-Za-z0-9]+$")
     api_secret: str = Field(min_length=10, max_length=128, pattern=r"^[A-Za-z0-9]+$")
+
+    @field_validator("api_key", "api_secret", mode="before")
+    @classmethod
+    def _clean(cls, v: object) -> object:
+        return _INVISIBLE.sub("", v) if isinstance(v, str) else v
 
 
 class StopIn(BaseModel):
@@ -269,3 +279,63 @@ async def delete(account_id: uuid.UUID, cur: Owner2FA, db: Db) -> dict:
     await db.delete(a)
     await db.commit()
     return {"ok": True}
+
+
+async def ensure_owner_demo(db) -> None:
+    """Демо-кабинет владельца из секретов SUNSCRYPT_BYBIT_DEMO_API_* (просьба
+    владельца «подключи сам»). Создаётся один раз, с торговлей на демо;
+    ключ проверяется у Bybit теми же правилами, что ключи пользователей."""
+    from app.config import get_settings
+    from app.models import User
+
+    s = get_settings()
+    if not (s.owner_email and s.bybit_demo_api_key and s.bybit_demo_api_secret):
+        return
+    owner = await db.scalar(select(User).where(User.email == s.owner_email.strip().lower()))
+    key = _INVISIBLE.sub("", s.bybit_demo_api_key.get_secret_value())
+    secret = _INVISIBLE.sub("", s.bybit_demo_api_secret.get_secret_value())
+    if owner is None:
+        return
+    exists = await db.scalar(
+        select(ExchangeAccount.id).where(
+            ExchangeAccount.user_id == owner.id,
+            ExchangeAccount.mode == "demo",
+            ExchangeAccount.key_tail == key[-4:],
+        )
+    )
+    if exists:
+        return
+    try:
+        chk = await bybit.check_key("demo", key, secret)
+    except bybit.BybitError as e:
+        log.warning("демо-кабинет владельца не создан: %s", e)
+        return
+    if not chk.ok:
+        log.warning("демо-кабинет владельца не создан: %s", "; ".join(chk.problems))
+        return
+    a = ExchangeAccount(
+        user_id=owner.id,
+        name="Демо (ключ владельца)",
+        mode="demo",
+        api_key_enc=crypto.encrypt(key.encode(), KEY_PURPOSE),
+        api_secret_enc=crypto.encrypt(secret.encode(), SECRET_PURPOSE),
+        key_tail=key[-4:],
+        permissions=chk.permissions,
+        ips=chk.ips,
+        warnings=chk.warnings,
+        status="ok",
+        equity_usd=await bybit.equity("demo", key, secret),
+        checked_at=datetime.now(UTC),
+        trading_enabled=True,
+    )
+    db.add(a)
+    await db.flush()
+    db.add(
+        EngineEvent(
+            account_id=a.id,
+            kind="trading",
+            message="Демо-кабинет владельца подключён из секретов; торговля включена",
+        )
+    )
+    await db.commit()
+    log.info("демо-кабинет владельца подключён, торговля включена")

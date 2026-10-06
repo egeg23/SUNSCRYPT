@@ -344,8 +344,10 @@ function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
               await api("/accounts", {
                 name: String(f.get("name") || (mode === "demo" ? "Демо" : "Реальный")),
                 mode,
-                api_key: String(f.get("api_key")).trim(),
-                api_secret: String(f.get("api_secret")).trim(),
+                // Ключи Bybit — только латиница и цифры; телефон при копировании
+                // может добавить пробелы и невидимые символы.
+                api_key: String(f.get("api_key")).replace(/[^A-Za-z0-9]/g, ""),
+                api_secret: String(f.get("api_secret")).replace(/[^A-Za-z0-9]/g, ""),
               });
               onDone();
             } catch (err) {
@@ -362,11 +364,11 @@ function AddWizard({ ip, onDone }: { ip: string; onDone: () => void }) {
         </label>
         <label>
           API Key
-          <input name="api_key" autoComplete="off" spellCheck={false} required />
+          <input name="api_key" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} required />
         </label>
         <label>
           API Secret
-          <input name="api_secret" type="password" autoComplete="off" spellCheck={false} required />
+          <input name="api_secret" type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} required />
         </label>
         {result ? (
           <div className="err" role="alert">

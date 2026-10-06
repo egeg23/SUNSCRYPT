@@ -47,6 +47,8 @@ services:
       # Владелец (секреты SUNSCRYPT_OWNER_*): создаётся при запуске, если его нет.
       OWNER_EMAIL: ${OWNER_EMAIL:-}
       OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      BYBIT_DEMO_API_KEY: ${BYBIT_DEMO_API_KEY:-}
+      BYBIT_DEMO_API_SECRET: ${BYBIT_DEMO_API_SECRET:-}
       SERVER_IP: ${SERVER_IP:-109.73.198.185}
       # Только для сквозного теста CI (учебный Bybit); на сервере — пусто.
       BYBIT_DEMO_URL: ${BYBIT_DEMO_URL:-https://api-demo.bybit.com}
