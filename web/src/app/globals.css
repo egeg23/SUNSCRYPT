@@ -15,6 +15,9 @@
   --line: #e8e2d6;
   --accent: #e5520f;
   --sun: linear-gradient(180deg, var(--solar), var(--flare));
+  --font-display: "Unbounded Variable";
+  --font-body: "Golos Text Variable";
+  --font-mono: "JetBrains Mono Variable";
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
