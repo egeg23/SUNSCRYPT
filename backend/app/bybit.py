@@ -28,6 +28,7 @@ def _host(mode: Mode) -> str:
     s = get_settings()
     return s.bybit_demo_url if mode == "demo" else s.bybit_real_url
 
+
 # Права, которые дают вывести или перевести деньги.
 FORBIDDEN = {"Wallet": "переводы и вывод", "Exchange": "обмен (Convert)"}
 EXTRA_TRADE = {
