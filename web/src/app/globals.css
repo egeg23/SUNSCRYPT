@@ -1,0 +1,12 @@
+:root {
+  --bg: #f7f7f5;
+  --fg: #16181d;
+  --muted: #6b7280;
+  --accent: #e8590c;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --fg: #eceef2; --muted: #9aa1ad; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }

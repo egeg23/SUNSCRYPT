@@ -1,0 +1,67 @@
+# SUNSCRYPT stack: Postgres, Redis, API (FastAPI), web (Next.js), Caddy (HTTPS + routing).
+# Copy .env.example to .env and fill it before `docker compose up -d --build`.
+name: sunscrypt
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sunscrypt
+      POSTGRES_DB: sunscrypt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sunscrypt -d sunscrypt"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      SUNS_ENV: ${SUNS_ENV:-prod}
+      SUNS_DATABASE_URL: postgresql+asyncpg://sunscrypt:${POSTGRES_PASSWORD}@postgres:5432/sunscrypt
+      SUNS_REDIS_URL: redis://redis:6379/0
+      SUNS_REGISTRATION: ${SUNS_REGISTRATION:-invite}
+      SUNS_LIVE_TRADING_ENABLED: ${SUNS_LIVE_TRADING_ENABLED:-false}
+      SUNS_CORS_ORIGINS: '["${SUNS_PUBLIC_URL:-http://localhost}"]'
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+      interval: 10s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      SUNS_SITE_ADDRESS: ${SUNS_SITE_ADDRESS:-:80}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on: [web, backend]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:

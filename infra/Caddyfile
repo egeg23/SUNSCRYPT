@@ -1,0 +1,18 @@
+# SUNS_SITE_ADDRESS=":80" serves plain HTTP on the server IP (temporary host).
+# Set it to a domain (e.g. "maximov-tech.ru") and Caddy obtains a TLS certificate automatically.
+{$SUNS_SITE_ADDRESS} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
