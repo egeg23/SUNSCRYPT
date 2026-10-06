@@ -22,7 +22,210 @@ type Account = {
   equity_usd: number | null;
   stopped: boolean;
   checked_at: string | null;
+  trading_enabled: boolean;
+  leverage: number;
+  capital_usd: number | null;
+  daily_loss_pct: number;
 };
+
+type Engine = {
+  heartbeat: {
+    ts: number;
+    positions: Record<string, number>;
+    pnl: number;
+    halted: string | null;
+    open_orders: number;
+  } | null;
+  reconcile: { ts: number; bybit: number; journal: number; added: number; extra: number } | null;
+  equity: { ts: string; usd: number } | null;
+  trades: { ts: string; sym: string; side: string; qty: number; price: number; fee: number; liquidity: string | null; source: string }[];
+  events: { ts: string; kind: string; message: string }[];
+};
+
+type Signal = { sym: string; ts_close: number; rhat: number; z: number; target: number; horizon: number };
+
+const when = (s: string | number) => new Date(s).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+
+function Signals() {
+  const [data, setData] = useState<{ alive: boolean; signals: Signal[] } | null>(null);
+  useEffect(() => {
+    const load = () => api<{ alive: boolean; signals: Signal[] }>("/engine/signals").then(setData).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, []);
+  if (!data) return null;
+  return (
+    <section>
+      <h2>Сигналы модели</h2>
+      <p className="muted" style={{ fontSize: 14, maxWidth: 720 }}>
+        Одни на всех. Решение — раз в 8 часов (00, 08, 16 UTC) по прогнозу Kronos на 8 часов вперёд:
+        лонг, шорт или вне рынка. Пары пока не отобраны (это этап 7) — идёт обкатка на демо.
+      </p>
+      {!data.alive ? (
+        <p className="err">Сервис сигналов не отвечает.</p>
+      ) : data.signals.length === 0 ? (
+        <p className="muted">Первые решения появятся на ближайшем закрытии 8-часового окна.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="log">
+            <thead>
+              <tr><th>Пара</th><th>Решение от</th><th>Прогноз</th><th>z</th><th>Позиция</th></tr>
+            </thead>
+            <tbody>
+              {data.signals.map((s) => (
+                <tr key={s.sym}>
+                  <td className="mono">{s.sym}</td>
+                  <td className="mono">{when(s.ts_close)}</td>
+                  <td className="mono">{(s.rhat * 100).toFixed(2)} %</td>
+                  <td className="mono">{s.z.toFixed(2)}</td>
+                  <td style={{ color: s.target > 0 ? "var(--gain)" : s.target < 0 ? "var(--loss)" : "var(--muted)" }}>
+                    {s.target > 0 ? "▲ лонг" : s.target < 0 ? "▼ шорт" : "— вне рынка"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EnginePanel({ a }: { a: Account }) {
+  const [e, setE] = useState<Engine | null>(null);
+  useEffect(() => {
+    const load = () => api<Engine>(`/accounts/${a.id}/engine`).then(setE).catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, [a.id]);
+  if (!e) return null;
+  const hb = e.heartbeat;
+  // eslint-disable-next-line react-hooks/purity -- возраст сердцебиения считается при каждой отрисовке
+  const alive = hb !== null && Date.now() - hb.ts < 60000;
+  return (
+    <div style={{ fontSize: 14, display: "grid", gap: 6, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+      <div>
+        Движок:{" "}
+        {alive ? (
+          hb!.halted ? <span style={{ color: "var(--loss)" }}>стоит — {hb!.halted}</span> : <span style={{ color: "var(--gain)" }}>● работает</span>
+        ) : a.trading_enabled ? (
+          <span className="muted">запускается…</span>
+        ) : (
+          <span className="muted">выключен</span>
+        )}
+      </div>
+      {alive ? (
+        <div className="muted">
+          Позиции:{" "}
+          {Object.keys(hb!.positions).length
+            ? Object.entries(hb!.positions).map(([s, q]) => `${s} ${q > 0 ? "+" : ""}${q}`).join(", ")
+            : "нет"}
+          {" · "}PnL с запуска: <span className="mono">{hb!.pnl >= 0 ? "+" : ""}{hb!.pnl.toFixed(2)} USD</span>
+        </div>
+      ) : null}
+      {e.reconcile ? (
+        <div className="muted" style={{ fontSize: 12 }}>
+          Сверка с Bybit {when(e.reconcile.ts)}: у Bybit {e.reconcile.bybit}, в журнале {e.reconcile.journal}
+          {e.reconcile.added || e.reconcile.extra ? `, расхождений ${e.reconcile.added + e.reconcile.extra}` : " — сходится"}
+        </div>
+      ) : null}
+      {e.trades.length ? (
+        <details>
+          <summary>Сделки ({e.trades.length})</summary>
+          <div className="table-wrap">
+            <table className="log">
+              <thead><tr><th>Время</th><th>Пара</th><th>Сторона</th><th>Кол-во</th><th>Цена</th><th>Комиссия</th></tr></thead>
+              <tbody>
+                {e.trades.map((t, i) => (
+                  <tr key={i}>
+                    <td className="mono">{when(t.ts)}</td>
+                    <td className="mono">{t.sym}</td>
+                    <td style={{ color: t.side === "buy" ? "var(--gain)" : "var(--loss)" }}>{t.side === "buy" ? "покупка" : "продажа"}</td>
+                    <td className="mono">{t.qty}</td>
+                    <td className="mono">{t.price}</td>
+                    <td className="mono">{t.fee.toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      ) : null}
+      {e.events.length ? (
+        <details>
+          <summary>События движка</summary>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {e.events.slice(0, 10).map((ev, i) => (
+              <li key={i} className="muted">
+                <span className="mono">{when(ev.ts)}</span> — {ev.message}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function TradingSettings({ a, reload }: { a: Account; reload: () => void }) {
+  const { busy, error, run } = useSubmit();
+  return (
+    <form
+      className="form"
+      style={{ borderTop: "1px solid var(--line)", paddingTop: 10, gap: 10 }}
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        const f = new FormData(ev.currentTarget);
+        run(async () => {
+          await api(`/accounts/${a.id}/settings`, {
+            leverage: Number(f.get("leverage")),
+            capital_usd: f.get("capital_usd") ? Number(f.get("capital_usd")) : null,
+            daily_loss_pct: Number(f.get("daily_loss_pct")),
+          }, "PATCH");
+          reload();
+        });
+      }}
+    >
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+        <label>
+          Капитал, USD
+          <input name="capital_usd" type="number" min={50} step={50} defaultValue={a.capital_usd ?? ""} placeholder="до 1000" />
+        </label>
+        <label>
+          Плечо
+          <select name="leverage" defaultValue={String(a.leverage)} style={{ font: "inherit", padding: "10px", borderRadius: 10, background: "var(--surface)", color: "var(--text)", border: "1px solid var(--line)" }}>
+            <option value="1">1× (рекомендуем)</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2× (максимум)</option>
+          </select>
+        </label>
+        <label>
+          Дневной лимит убытка, %
+          <input name="daily_loss_pct" type="number" min={0.5} max={50} step={0.5} defaultValue={a.daily_loss_pct} />
+        </label>
+      </div>
+      {error ? <p className="err">{error}</p> : null}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn ghost" disabled={busy}>Сохранить настройки</button>
+        <button
+          type="button"
+          className="btn"
+          disabled={busy || a.status !== "ok" || a.stopped}
+          onClick={() => run(async () => { await api(`/accounts/${a.id}/settings`, { trading_enabled: !a.trading_enabled }, "PATCH"); reload(); })}
+          style={a.trading_enabled ? { background: "var(--surface-2)", color: "var(--text)" } : undefined}
+        >
+          {a.trading_enabled ? "Выключить торговлю" : "Включить торговлю"}
+        </button>
+      </div>
+      <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+        Капитал — сколько из баланса отдаётся стратегии; он делится поровну между парами. При убытке за
+        сутки больше лимита движок закрывает позиции до конца суток (UTC).
+      </p>
+    </form>
+  );
+}
 
 const money = (n: number | null) =>
   n === null ? "—" : n.toLocaleString("ru-RU", { maximumFractionDigits: 2 }) + " USD";
@@ -222,6 +425,8 @@ function AccountCard({ a, reload }: { a: Account; reload: () => void }) {
           </div>
         ))}
       </div>
+      <TradingSettings a={a} reload={reload} />
+      <EnginePanel a={a} />
       {error ? <p className="err">{error}</p> : null}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="btn ghost" disabled={busy} onClick={() => run(async () => { await api(`/accounts/${a.id}/recheck`, {}); reload(); })}>
@@ -232,7 +437,7 @@ function AccountCard({ a, reload }: { a: Account; reload: () => void }) {
           disabled={busy}
           onClick={() => run(async () => { await api(`/accounts/${a.id}/stop`, { stopped: !a.stopped }); reload(); })}
         >
-          {a.stopped ? "Возобновить" : "Остановить"}
+          {a.stopped ? "Снять аварийную остановку" : "Аварийная остановка"}
         </button>
         <button
           className="btn ghost"
@@ -308,6 +513,7 @@ export default function AccountsPage() {
           ) : (
             <p className="muted">Кабинетов пока нет.</p>
           )}
+          <Signals />
           {adding ? (
             <AddWizard
               ip={ip}

@@ -43,6 +43,7 @@ export default function AdminPage() {
   const [invites, setInvites] = useState<InviteRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [link, setLink] = useState<{ url: string; hint: string } | null>(null);
+  const [flags, setFlags] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +53,7 @@ export default function AdminPage() {
       ]);
       setInvites(i);
       setUsers(u);
+      setFlags(await api<Record<string, boolean>>("/admin/flags"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/login");
       else if (e instanceof ApiError) setError(e.message);
@@ -68,6 +70,35 @@ export default function AdminPage() {
       <Header />
       <h1 style={{ fontSize: 28 }}>Владелец</h1>
       {error ? <p className="err">{error}</p> : null}
+
+      <section>
+        <h2>Аварийная остановка</h2>
+        <div className="card" style={{ maxWidth: 560 }}>
+          {flags.global_stop ? (
+            <p className="err" style={{ marginBottom: 12 }}>
+              Включена: все кабинеты закрыли позиции и не торгуют.
+            </p>
+          ) : (
+            <p className="muted" style={{ fontSize: 14 }}>
+              Одна кнопка для всех кабинетов: движок отменяет ордера и закрывает позиции. Реальная
+              торговля: <b>{flags.real_trading_enabled ? "включена" : "выключена"}</b>.
+            </p>
+          )}
+          <button
+            className="btn"
+            disabled={busy}
+            style={flags.global_stop ? undefined : { background: "var(--loss)", color: "#fff" }}
+            onClick={() => {
+              if (!flags.global_stop && !confirm("Остановить торговлю во всех кабинетах и закрыть позиции?")) return;
+              run(async () => {
+                setFlags(await api<Record<string, boolean>>("/admin/global-stop", { stopped: !flags.global_stop }));
+              });
+            }}
+          >
+            {flags.global_stop ? "Снять общую остановку" : "Остановить всё"}
+          </button>
+        </div>
+      </section>
 
       <section>
         <h2>Пригласить</h2>

@@ -92,6 +92,28 @@ async def _get(mode: Mode, key: str, secret: str, path: str, query: str = "") ->
         raise BybitError(f"Bybit ответил непонятно (HTTP {r.status_code}).") from e
 
 
+async def post(mode: Mode, key: str, secret: str, path: str, body: dict) -> dict:
+    """Подписанный POST (например, установка плеча)."""
+    import json
+
+    raw = json.dumps(body, separators=(",", ":"))
+    ts, rw = str(int(time.time() * 1000)), "5000"
+    sign = hmac.new(secret.encode(), (ts + key + rw + raw).encode(), hashlib.sha256).hexdigest()
+    headers = {
+        "X-BAPI-API-KEY": key,
+        "X-BAPI-TIMESTAMP": ts,
+        "X-BAPI-RECV-WINDOW": rw,
+        "X-BAPI-SIGN": sign,
+        "content-type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15, transport=transport) as client:
+            r = await client.post(_host(mode) + path, content=raw, headers=headers)
+        return r.json()
+    except (httpx.HTTPError, ValueError) as e:
+        raise BybitError("Bybit не ответил.") from e
+
+
 def evaluate(result: dict, server_ip: str) -> KeyCheck:
     """Сверка прав ключа с правилами. Чистая функция — легко тестировать."""
     perms = {k: list(v) for k, v in (result.get("permissions") or {}).items() if v}

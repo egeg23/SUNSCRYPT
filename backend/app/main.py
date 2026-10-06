@@ -74,6 +74,25 @@ async def health(response: Response) -> dict:
     }
 
 
+@app.get("/api/engine/signals")
+async def engine_signals() -> dict:
+    """Последние решения сервиса сигналов по парам — общие для всех."""
+    import json as _json
+
+    from app.cache import redis
+
+    try:
+        hb = await redis.get("hb:signals")
+        pairs = _json.loads(hb)["pairs"] if hb else []
+        sigs = [await redis.get(f"sig:{p}") for p in pairs]
+    except Exception:
+        return {"alive": False, "signals": []}
+    return {
+        "alive": hb is not None,
+        "signals": [_json.loads(s) for s in sigs if s],
+    }
+
+
 @app.get("/api/status")
 async def status(flags: Annotated[dict[str, bool], Depends(get_flags)]) -> dict:
     """Публичный режим сервиса: что разрешено прямо сейчас."""

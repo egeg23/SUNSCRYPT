@@ -152,7 +152,7 @@ try {
   if (html.includes(GOOD_KEY) || html.includes(GOOD_SECRET)) throw new Error("ключ виден на странице");
 
   step("кабинет Bybit: остановка и удаление");
-  await page.click("text=Остановить");
+  await page.click("text=Аварийная остановка");
   await page.getByText("Остановлен вручную").waitFor();
   page.once("dialog", (d) => d.accept());
   await page.click("text=Удалить");

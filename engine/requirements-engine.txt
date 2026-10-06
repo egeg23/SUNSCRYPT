@@ -1,0 +1,10 @@
+# Движок в проде. NautilusTrader закреплён; обновлять только после
+# `python tools/check_nautilus.py --test` = PASS (бриф, раздел 4).
+# torch ставится отдельно, CPU-сборка (engine/Dockerfile).
+nautilus_trader==2.0.0rc6
+pandas==3.0.6
+pyarrow==25.0.1
+numpy==2.5.3
+einops==0.8.2
+safetensors==0.8.0
+huggingface_hub==2.1.1

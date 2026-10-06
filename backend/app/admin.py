@@ -3,6 +3,7 @@
 Только для администратора с включённой 2FA. Позже то же самое будет доступно
 из Telegram-бота (этап 9)."""
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -12,8 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.auth import Current, Db, new_invite, new_reset_link, require_2fa
-from app.models import Invite, User
+from app.cache import redis
+from app.db import read_flags
+from app.models import EngineEvent, Invite, SystemFlag, User
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
@@ -82,3 +86,31 @@ async def reset_link(user_id: uuid.UUID, cur: Admin, db: Db) -> dict:
     link = await new_reset_link(db, user)
     await db.commit()
     return {"link": link, "expires_in_hours": 1}
+
+
+class GlobalStopIn(BaseModel):
+    stopped: bool
+
+
+@router.get("/flags")
+async def flags(cur: Admin, db: Db) -> dict[str, bool]:
+    return await read_flags(db)
+
+
+@router.post("/global-stop")
+async def global_stop(body: GlobalStopIn, cur: Admin, db: Db) -> dict[str, bool]:
+    """Общая аварийная остановка: все кабинеты закрывают позиции и встают."""
+    flag = await db.get(SystemFlag, "global_stop")
+    flag.value = body.stopped
+    db.add(
+        EngineEvent(
+            kind="global_stop",
+            message="Общая аварийная остановка" if body.stopped else "Общая остановка снята",
+        )
+    )
+    await db.commit()
+    try:
+        await redis.set("stop:global", "1" if body.stopped else "0")
+    except Exception:  # Redis недоступен — диспетчер подхватит флаг из базы
+        log.warning("Redis недоступен")
+    return await read_flags(db)

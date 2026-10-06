@@ -6,7 +6,7 @@
 # Наружу смотрит только gateway, и только на петлевой адрес: в интернет его
 # отдаёт хостовый nginx с сертификатом. У каждого сервиса — потолок памяти:
 # рядом работает devuz.studio, и SUNSCRYPT не должен его вытеснить
-# (сервер: 5 CPU, 7.8 ГБ; здесь в сумме ≈ 1.2 ГБ).
+# (сервер: 5 CPU, 7.8 ГБ; потолки в сумме ≈ 4.9 ГБ, обычно занято ~1.5 ГБ).
 name: sunscrypt
 
 x-logging: &logging
@@ -65,6 +65,50 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     mem_limit: 384m
+    logging: *logging
+
+  # Движок (этап 4). Сигналы: Kronos раз на всех, решения — в Redis.
+  signals:
+    build:
+      context: ..
+      dockerfile: engine/Dockerfile
+    image: sunscrypt-engine
+    command: ["python", "-m", "sunscrypt_engine.signal_service"]
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SUNS_MODEL_DIR: /models/ft_small_s300
+      KRONOS_THREADS: "2"
+      SIGNAL_PAIRS: ${SIGNAL_PAIRS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT}
+    volumes:
+      - ${MODELS_DIR:-../models}:/models
+    depends_on:
+      redis: { condition: service_healthy }
+    mem_limit: 1536m
+    cpus: 2
+    logging: *logging
+
+  # Диспетчер: по процессу NautilusTrader на каждый кабинет с торговлей.
+  orchestrator:
+    image: sunscrypt-engine
+    command: ["python", "-m", "sunscrypt_engine.orchestrator"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://sunscrypt:${POSTGRES_PASSWORD:?нет POSTGRES_PASSWORD}@postgres:5432/sunscrypt
+      REDIS_URL: redis://redis:6379/0
+      MASTER_KEY: ${MASTER_KEY:-}
+      MASTER_KEY_PREVIOUS: ${MASTER_KEY_PREVIOUS:-}
+      SIGNAL_PAIRS: ${SIGNAL_PAIRS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT}
+      BYBIT_DEMO_URL: ${BYBIT_DEMO_URL:-https://api-demo.bybit.com}
+      BYBIT_REAL_URL: ${BYBIT_REAL_URL:-https://api.bybit.com}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      signals: { condition: service_started }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    mem_limit: 2g
+    cpus: 2
     logging: *logging
 
   postgres:

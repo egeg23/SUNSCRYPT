@@ -32,9 +32,10 @@ function detail(body: unknown, status: number): string {
 export async function api<T = Record<string, unknown>>(
   path: string,
   body?: unknown,
+  method?: "POST" | "PATCH" | "DELETE",
 ): Promise<T> {
   const r = await fetch(`/api${path}`, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",

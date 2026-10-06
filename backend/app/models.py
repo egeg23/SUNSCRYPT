@@ -11,6 +11,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -156,5 +157,58 @@ class ExchangeAccount(Base):
     equity_usd: Mapped[float | None] = mapped_column(Float)
     # Аварийная остановка кабинета (бриф, правило 4); используется движком.
     stopped: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Торговля: включает пользователь; по умолчанию выключена.
+    trading_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    leverage: Mapped[float] = mapped_column(Float, default=1.0, server_default="1")
+    # Капитал под стратегию, USD; пусто — min(баланс, 1000).
+    capital_usd: Mapped[float | None] = mapped_column(Float)
+    daily_loss_pct: Mapped[float] = mapped_column(Float, default=5.0, server_default="5")
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_col()
+
+
+class Trade(Base):
+    """Журнал исполнений кабинета: от движка и из сверки с Bybit."""
+
+    __tablename__ = "trades"
+    __table_args__ = (UniqueConstraint("account_id", "trade_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("exchange_accounts.id", ondelete="CASCADE"), index=True
+    )
+    trade_id: Mapped[str] = mapped_column(String(80))  # execId Bybit
+    order_id: Mapped[str | None] = mapped_column(String(80))
+    sym: Mapped[str] = mapped_column(String(20))
+    side: Mapped[str] = mapped_column(String(4))
+    qty: Mapped[float] = mapped_column(Float)
+    price: Mapped[float] = mapped_column(Float)
+    fee: Mapped[float] = mapped_column(Float, default=0)
+    fee_ccy: Mapped[str | None] = mapped_column(String(10))
+    liquidity: Mapped[str | None] = mapped_column(String(10))
+    source: Mapped[str] = mapped_column(String(10), default="engine")  # engine | reconcile
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class EquitySnapshot(Base):
+    __tablename__ = "equity_snapshots"
+
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("exchange_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    equity_usd: Mapped[float] = mapped_column(Float)
+
+
+class EngineEvent(Base):
+    """Журнал движка: запуски, остановки, сбои, сверки."""
+
+    __tablename__ = "engine_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("exchange_accounts.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32))
+    message: Mapped[str] = mapped_column(String(500))
+    ts: Mapped[datetime] = _now_col(index=True)

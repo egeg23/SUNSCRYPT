@@ -117,6 +117,12 @@ else
   rm -rf "$tmp"
 fi
 
+# Веса читает движок от непривилегированного пользователя (в архиве файл —
+# только для root). Кэш HuggingFace (токенизатор Kronos) он же пишет.
+[ -d "$MODELS_DIR/$W_NAME" ] && chmod -R a+rX "$MODELS_DIR/$W_NAME"
+mkdir -p "$MODELS_DIR/hf" && chown 10001 "$MODELS_DIR/hf"
+export MODELS_DIR
+
 # ── 4. Сборка и запуск ──────────────────────────────────────────────────────
 export GIT_COMMIT
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
@@ -186,6 +192,12 @@ say "Сервер: $(nproc) CPU, память $(free -h | awk '/^Mem:/{print $2"
 for url in https://api.bybit.com/v5/market/time https://api-demo.bybit.com/v5/market/time https://stream.bybit.com/v5/public/linear; do
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || echo "нет ответа")"
   say "Bybit $url → $code"
+done
+
+# ── 6б. Движок ──────────────────────────────────────────────────────────────
+for svc in signals orchestrator; do
+  st="$("${COMPOSE[@]}" ps --format '{{.State}}' "$svc" 2>/dev/null || echo "нет")"
+  say "Движок: $svc — $st"
 done
 
 # ── 7. Мастер-ключ и демо-ключ Bybit владельца ──────────────────────────────

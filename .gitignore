@@ -12,3 +12,4 @@ e2e-failure.png
 ci.env
 models/
 engine/var/
+engine/.venv/
