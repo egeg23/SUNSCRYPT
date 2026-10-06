@@ -181,8 +181,7 @@ def test_switch_to_real_needs_owner_flag_2fa_risk_and_limits(client, db):
     _real_flag(db, True)
     try:
         assert (
-            "риски"
-            in client.post(url, json={**full, "confirm_risk": False, "code": "123456"}).text
+            "риски" in client.post(url, json={**full, "confirm_risk": False, "code": "123456"}).text
         )
         assert (
             "лимит"
