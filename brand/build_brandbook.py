@@ -102,7 +102,7 @@ ul.rules {{ margin:0; padding-left:1.2em; display:grid; gap:6px; max-width:70ch;
     <span class="eyebrow">Бренд · версия 1 · на согласование</span>
     <h1>SUNSCRYPT</h1>
     <p class="lede">Знак — солнце над горизонтом, нижняя часть которого разрезана на полосы, как уровни цены на графике.
-    Тёплое солнце на ночном небе: рынок, который открывается каждый день. Надпись набрана шрифтом Unbounded и переведена в кривые,
+    Тёплое солнце на ночном небе: рынок, который открывается каждый день. Буква N собрана из трёх свечей графика: рост, падение, рост. Надпись набрана шрифтом Unbounded и переведена в кривые,
     поэтому логотип выглядит одинаково без установленных шрифтов.</p>
   </header>
 
@@ -123,7 +123,7 @@ ul.rules {{ margin:0; padding-left:1.2em; display:grid; gap:6px; max-width:70ch;
   <section>
     <h2>Палитра</h2>
     <div class="swatches">{swatches}</div>
-    <p class="cap">Зелёный и красный — только для данных: прибыль и убыток, лонг и шорт. В элементах интерфейса их не используем.</p>
+    <p class="cap">Зелёный и красный — для данных (прибыль и убыток, лонг и шорт) и для свечей в букве N логотипа. Кнопки и другие элементы интерфейса ими не красим.</p>
   </section>
 
   <section class="type">
@@ -139,7 +139,7 @@ ul.rules {{ margin:0; padding-left:1.2em; display:grid; gap:6px; max-width:70ch;
     <div class="tg">
       <div class="profile">
         <img src="{png64("telegram-avatar-640.png")}" alt="Аватар бота SUNSCRYPT">
-        <b>SUNSCRYPT</b><span>@sunscrypt_bot</span>
+        <b>SUNSCRYPT Trader</b><span>@SUNSCRYPT_tradebot</span>
         <p>Уведомления о сделках робота SUNSCRYPT на Bybit: сделки, дневной отчёт, тревоги и аварийная остановка.</p>
       </div>
       <div class="chat" aria-label="Пример сообщений бота">
@@ -157,7 +157,7 @@ ul.rules {{ margin:0; padding-left:1.2em; display:grid; gap:6px; max-width:70ch;
     <ul class="rules">
       <li><span class="ok">Можно:</span> знак отдельно от надписи (иконки, аватар, favicon).</li>
       <li><span class="ok">Можно:</span> поле вокруг логотипа не меньше половины высоты знака.</li>
-      <li><span class="no">Нельзя:</span> менять цвета градиента, поворачивать знак, растягивать надпись.</li>
+      <li><span class="no">Нельзя:</span> менять цвета градиента и свечей, поворачивать знак, растягивать надпись.</li>
       <li><span class="no">Нельзя:</span> ставить светлую версию на светлый фон и тёмную на тёмный.</li>
       <li>Минимальный размер: знак 16 px, логотип с надписью 24 px по высоте.</li>
     </ul>

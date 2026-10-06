@@ -42,8 +42,15 @@ def font() -> TTFont:
     return instantiateVariableFont(f, {"wght": 700})
 
 
-def wordmark_path(text: str, tracking: float = 0.03) -> tuple[str, float, float]:
-    """SVG path of `text` in Unbounded Bold, baseline at y=0, cap height normalised to 100 units."""
+UP = "#1F9D6B"       # green candle
+DOWN = "#D93F45"     # red candle
+
+
+def wordmark_path(text: str, tracking: float = 0.03, skip: str = "N") -> tuple[str, float, float, list]:
+    """SVG path of `text` in Unbounded Bold, baseline at y=0, cap height normalised to 100 units.
+
+    Letters in `skip` are left out; their ink boxes (x0, x1, stem) are returned so candles can replace them.
+    """
     f = font()
     gs, cmap, hmtx = f.getGlyphSet(), f.getBestCmap(), f["hmtx"]
     upm = f["head"].unitsPerEm
@@ -51,15 +58,42 @@ def wordmark_path(text: str, tracking: float = 0.03) -> tuple[str, float, float]
     scale = 100 / cap
     pen = SVGPathPen(gs)
     x = 0.0
+    holes = []
+    stem_box = BoundsPen(gs)
+    gs[cmap[ord("I")]].draw(stem_box)
+    stem = (stem_box.bounds[2] - stem_box.bounds[0]) * scale
     for ch in text:
         g = cmap[ord(ch)]
-        gs[g].draw(TransformPen(pen, (scale, 0, 0, -scale, x, 0)))
+        if ch in skip:
+            bp = BoundsPen(gs)
+            gs[g].draw(bp)
+            holes.append((x + bp.bounds[0] * scale, x + bp.bounds[2] * scale, stem))
+        else:
+            gs[g].draw(TransformPen(pen, (scale, 0, 0, -scale, x, 0)))
         x += (hmtx[g][0] + tracking * upm) * scale
     width = x - tracking * upm * scale
     bp = BoundsPen(gs)
     gs[cmap[ord(text[0])]].draw(bp)
     left = (bp.bounds[0] if bp.bounds else 0) * scale
-    return pen.getCommands(), width, left
+    return pen.getCommands(), width, left, holes
+
+
+def candle_n(x0: float, x1: float, stem: float, bg: str) -> str:
+    """Letter N as three candles: green up, red down (the diagonal), green up. Baseline y=0, cap y=-100."""
+    top, bot, wick = -93.0, -7.0, 5.0           # bodies fill the cap height; wicks poke just past it
+    gap = 3.2                                   # background-coloured outline that separates the candles
+
+    def green(xl: float) -> str:
+        cx = xl + stem / 2
+        return (f'<rect x="{cx - wick / 2:.2f}" y="-106" width="{wick}" height="112" rx="{wick / 2}" fill="{UP}"/>'
+                f'<rect x="{xl:.2f}" y="{top}" width="{stem:.2f}" height="{bot - top}" rx="3" fill="{UP}" '
+                f'stroke="{bg}" stroke-width="{gap}" paint-order="stroke"/>')
+
+    # red body: parallelogram from the top of the left stem to the bottom of the right stem
+    a, b = x0 + stem * 0.1, x0 + stem * 1.45
+    c, d = x1 - stem * 1.45, x1 - stem * 0.1
+    red = f'<path d="M{a:.2f} {top}H{b:.2f}L{d:.2f} {bot}H{c:.2f}Z" fill="{DOWN}"/>'
+    return f"<g>{red}{green(x0)}{green(x1 - stem)}</g>"
 
 
 def _slice(cx: float, cy: float, r: float, y0: float, y1: float) -> str:
@@ -105,22 +139,24 @@ def inner(svg: str) -> str:
     return svg.split(">", 1)[1].rsplit("</svg>", 1)[0]
 
 
-def logo(text_color: str, uid: str) -> str:
-    """Horizontal lockup: mark + outlined wordmark."""
-    d, w, left = wordmark_path("SUNSCRYPT")
+def logo(text_color: str, uid: str, bg: str) -> str:
+    """Horizontal lockup: mark + outlined wordmark with the candle N."""
+    d, w, left, holes = wordmark_path("SUNSCRYPT")
+    n = "".join(candle_n(*h, bg) for h in holes)
     s = 0.36                                     # cap height 100 -> 36 px, matches the 64 px mark
     gap = 18
     total_w = 64 + gap + w * s
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total_w:.1f} 64" height="64">
   <g>{inner(mark(64, uid=uid))}</g>
-  <path transform="translate({64 + gap - left * s:.2f} 50) scale({s})" d="{d}" fill="{text_color}"/>
+  <g transform="translate({64 + gap - left * s:.2f} 50) scale({s})"><path d="{d}" fill="{text_color}"/>{n}</g>
 </svg>'''
 
 
-def wordmark(text_color: str) -> str:
-    d, w, left = wordmark_path("SUNSCRYPT")
+def wordmark(text_color: str, bg: str) -> str:
+    d, w, left, holes = wordmark_path("SUNSCRYPT")
+    n = "".join(candle_n(*h, bg) for h in holes)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{left:.1f} -100 {w - left:.1f} 100" height="100">
-  <path d="{d}" fill="{text_color}"/>
+  <path d="{d}" fill="{text_color}"/>{n}
 </svg>'''
 
 
@@ -142,10 +178,10 @@ def png(name: str, svg: str, size: int) -> None:
 
 def main() -> None:
     write("mark.svg", mark(64, uid="a"))
-    write("logo-light.svg", logo(INK, "b"))          # for light backgrounds
-    write("logo-dark.svg", logo(DAWN, "c"))          # for dark backgrounds
-    write("wordmark-light.svg", wordmark(INK))
-    write("wordmark-dark.svg", wordmark(DAWN))
+    write("logo-light.svg", logo(INK, "b", DAWN))          # for light backgrounds
+    write("logo-dark.svg", logo(DAWN, "c", INK))          # for dark backgrounds
+    write("wordmark-light.svg", wordmark(INK, DAWN))
+    write("wordmark-dark.svg", wordmark(DAWN, INK))
     tile = mark(64, tile=INK, uid="t")
     write("icon.svg", tile)
     png("favicon-32.png", tile, 32)
