@@ -43,14 +43,26 @@ type Engine = {
   events: { ts: string; kind: string; message: string }[];
 };
 
-type Signal = { sym: string; ts_close: number; rhat: number; z: number; target: number; horizon: number };
+type Signal = {
+  sym: string;
+  ts_close: number;
+  rhat: number;
+  z: number;
+  target: number;
+  horizon: number;
+  model: string;
+  paused?: boolean;
+};
+type Signals = { alive: boolean; config: string | null; signals: Signal[] };
+
+const REPORT = "https://github.com/egeg23/SUNSCRYPT/blob/main/engine/research/selection/REPORT.md";
 
 const when = (s: string | number) => new Date(s).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
 function Signals() {
-  const [data, setData] = useState<{ alive: boolean; signals: Signal[] } | null>(null);
+  const [data, setData] = useState<Signals | null>(null);
   useEffect(() => {
-    const load = () => api<{ alive: boolean; signals: Signal[] }>("/engine/signals").then(setData).catch(() => {});
+    const load = () => api<Signals>("/engine/signals").then(setData).catch(() => {});
     load();
     const t = setInterval(load, 30000);
     return () => clearInterval(t);
@@ -58,30 +70,40 @@ function Signals() {
   if (!data) return null;
   return (
     <section>
-      <h2>Сигналы модели</h2>
+      <h2>Сигналы</h2>
       <p className="muted" style={{ fontSize: 14, maxWidth: 720 }}>
-        Одни на всех. Решение — раз в 8 часов (00, 08, 16 UTC) по прогнозу Kronos на 8 часов вперёд:
-        лонг, шорт или вне рынка. Пары пока не отобраны (это этап 7) — идёт обкатка на демо.
+        Одни на всех. Пары и стратегия каждой — по итогам отбора на истории после комиссий
+        {data.config ? ` (версия ${data.config})` : ""}:{" "}
+        <a href={REPORT} target="_blank" rel="noreferrer">
+          отчёт с цифрами и оговорками
+        </a>
+        . Моментум — раз в сутки в 00:00 UTC позиция по знаку движения цены за 24 часа; Kronos — раз в 8
+        часов по прогнозу модели. Прошлые результаты не обещают будущих: на истории просадки по паре
+        доходили до 43–71%.
       </p>
       {!data.alive ? (
         <p className="err">Сервис сигналов не отвечает.</p>
       ) : data.signals.length === 0 ? (
-        <p className="muted">Первые решения появятся на ближайшем закрытии 8-часового окна.</p>
+        <p className="muted">Первые решения появятся на ближайшем окне решения.</p>
       ) : (
         <div className="table-wrap">
           <table className="log">
             <thead>
-              <tr><th>Пара</th><th>Решение от</th><th>Прогноз</th><th>z</th><th>Позиция</th></tr>
+              <tr><th>Пара</th><th>Стратегия</th><th>Решение от</th><th>Основание</th><th>Позиция</th></tr>
             </thead>
             <tbody>
               {data.signals.map((s) => (
                 <tr key={s.sym}>
                   <td className="mono">{s.sym}</td>
+                  <td>{s.model === "momentum_4h" ? "моментум" : `Kronos (${s.model})`}</td>
                   <td className="mono">{when(s.ts_close)}</td>
-                  <td className="mono">{(s.rhat * 100).toFixed(2)} %</td>
-                  <td className="mono">{s.z.toFixed(2)}</td>
+                  <td className="mono">
+                    {s.model === "momentum_4h"
+                      ? `за 24 ч ${(s.rhat * 100).toFixed(2)} %`
+                      : `прогноз ${(s.rhat * 100).toFixed(2)} %, z ${s.z.toFixed(2)}`}
+                  </td>
                   <td style={{ color: s.target > 0 ? "var(--gain)" : s.target < 0 ? "var(--loss)" : "var(--muted)" }}>
-                    {s.target > 0 ? "▲ лонг" : s.target < 0 ? "▼ шорт" : "— вне рынка"}
+                    {s.paused ? "⏸ пауза (дрейф)" : s.target > 0 ? "▲ лонг" : s.target < 0 ? "▼ шорт" : "— вне рынка"}
                   </td>
                 </tr>
               ))}

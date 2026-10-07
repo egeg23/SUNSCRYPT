@@ -92,6 +92,7 @@ async def engine_signals(cur: Annotated[auth.Current, Depends(auth.require_login
         return {"alive": False, "signals": []}
     return {
         "alive": hb is not None,
+        "config": _json.loads(hb).get("config") if hb else None,
         "signals": [_json.loads(s) for s in sigs if s],
     }
 

@@ -10,8 +10,8 @@ export default function Home() {
       <Header />
       <h1>Автоматическая торговля перпетуалами на Bybit</h1>
       <p className="muted" style={{ maxWidth: 680, fontSize: 18 }}>
-        Сигнал модели Kronos → исполнение NautilusTrader → ваш кабинет Bybit. Дашборд в
-        реальном времени и Telegram-бот. Сервис в разработке.
+        Стратегии, отобранные на истории после комиссий → исполнение NautilusTrader → ваш кабинет
+        Bybit. Дашборд в реальном времени. Сервис в разработке, торговля — только на демо-счёте.
       </p>
       <RiskNote />
       <div className="grid">
@@ -19,12 +19,12 @@ export default function Home() {
         <div className="card">
           <h3>Что дальше</h3>
           <p className="muted" style={{ fontSize: 14 }}>
-            Вход с 2FA работает; доступ — по приглашению владельца. Дальше — подключение кабинета Bybit по API-ключу без права вывода,
-            дашборд с честной статистикой после комиссий.
+            Доступ — по приглашению владельца, вход с 2FA. Кабинет Bybit подключается API-ключом без права
+            вывода; на дашборде — честная статистика после комиссий и фандинга.
           </p>
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <Link href="/login">Вход →</Link>
-            <Link href="/brand">Бренд →</Link>
+            <Link href="/terms">Условия и риски →</Link>
           </div>
         </div>
       </div>
