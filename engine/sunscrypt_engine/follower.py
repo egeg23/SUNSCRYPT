@@ -30,6 +30,10 @@ MAX_LEVERAGE = 2.0
 TICK_SECS = 15
 REQUOTE_SECS = 60
 MAKER_PATIENCE_SECS = 20 * 60
+# Столько отказов «мейкер-заявка исполнилась бы сразу» подряд — и дальше по
+# рынку: на быстром рынке (и на демо) лимитка у края стакана может не
+# встать никогда, а у моментума весь смысл — во входе в начале суток.
+MAKER_REJECTS_MAX = 3
 
 
 class FollowerConfig(StrategyConfig):
@@ -78,6 +82,7 @@ class FollowerStrategy(Strategy):
         self.total_start = 0.0
         self.order_born: dict[str, float] = {}  # client_order_id → время постановки
         self.target_since: dict[str, tuple[int, float]] = {}  # sym → (target, с какого момента)
+        self.maker_rejects: dict[str, int] = {}  # sym → отказы post-only подряд
 
     # ── жизненный цикл ──────────────────────────────────────────────────────
     def on_start(self) -> None:
@@ -90,6 +95,11 @@ class FollowerStrategy(Strategy):
         # закрывает только явная аварийная остановка — см. _halt.
         for iid in self.cfg.instrument_ids:
             self.cancel_all_orders(iid)
+
+    def on_order_rejected(self, ev) -> None:
+        if getattr(ev, "due_post_only", False):
+            sym = sym_of(ev.instrument_id)
+            self.maker_rejects[sym] = self.maker_rejects.get(sym, 0) + 1
 
     def on_order_filled(self, ev) -> None:
         fill = {
@@ -214,6 +224,7 @@ class FollowerStrategy(Strategy):
         prev = self.target_since.get(sym)
         if prev is None or prev[0] != target:
             self.target_since[sym] = (target, self._now())
+            self.maker_rejects[sym] = 0
         open_orders = self.cache.orders_open(instrument_id=iid)
         if abs(delta) < step / 2 or (
             cur and target and (cur > 0) == (target > 0) and abs(delta) < 0.25 * abs(cur)
@@ -236,9 +247,9 @@ class FollowerStrategy(Strategy):
         qty = inst.make_qty(Decimal(str(abs(delta))))
         reduce_only = target == 0 or (cur != 0 and abs(want) < abs(cur) and (want > 0) == (cur > 0))
         waited = now - self.target_since[sym][1]
-        if self.cfg.execution == "maker" and waited < MAKER_PATIENCE_SECS:
-            q = self.cache.quote(iid)
-            px = q.bid_price if side == OrderSide.BUY else q.ask_price
+        if (self.cfg.execution == "maker" and waited < MAKER_PATIENCE_SECS
+                and self.maker_rejects.get(sym, 0) < MAKER_REJECTS_MAX):
+            px = self._maker_price(iid, side)
             order = self.order_factory.limit(
                 iid, side, qty, px, post_only=True, reduce_only=reduce_only,
                 time_in_force=TimeInForce.GTC,
@@ -247,6 +258,11 @@ class FollowerStrategy(Strategy):
             order = self.order_factory.market(iid, side, qty, reduce_only=reduce_only)
         self.order_born[str(order.client_order_id)] = now
         self.submit_order(order)
+
+    def _maker_price(self, iid, side):
+        """Цена мейкер-заявки: у своего края стакана."""
+        q = self.cache.quote(iid)
+        return q.bid_price if side == OrderSide.BUY else q.ask_price
 
     def _heartbeat(self) -> None:
         pos = {sym_of(i): float(self.portfolio.net_position(i)) for i in self.cfg.instrument_ids}

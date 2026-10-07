@@ -188,3 +188,19 @@ def test_foreign_open_order_is_requoted_not_stuck(run, monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "Scripted", WithForeignOrder)
     _, seen = run({3: lambda r: signal(r, 0, +1)}, minutes=60)
     assert pos_at(seen, 59) > 0.1  # позиция набрана, чужой ордер не завис навсегда
+
+
+class CrossingMaker(Scripted):
+    """Мейкер-заявка всегда пересекает стакан (как при устаревшей котировке):
+    биржа отклоняет post-only."""
+
+    def _maker_price(self, iid, side):
+        q = self.cache.quote(iid)
+        return q.ask_price if side == OrderSide.BUY else q.bid_price
+
+
+def test_post_only_rejects_fall_back_to_market_quickly(run, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "Scripted", CrossingMaker)
+    _, seen = run({1: lambda r: signal(r, 0, +1)}, minutes=30)
+    # Без отката на рынок ждал бы 20 минут; три отказа по 15 с — и по рынку.
+    assert pos_at(seen, 3) > 0.1
