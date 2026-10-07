@@ -87,7 +87,8 @@ services:
       TELEGRAM_API: ${TELEGRAM_API:-https://api.telegram.org}
     depends_on:
       backend: { condition: service_started }
-    mem_limit: 128m
+    # ~130 МБ после запуска (FastAPI-приложение целиком); 128m не хватало.
+    mem_limit: 256m
     logging: *logging
 
   # Движок (этап 4). Сигналы: Kronos раз на всех, решения — в Redis.
