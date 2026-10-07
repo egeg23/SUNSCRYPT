@@ -23,7 +23,8 @@
   `sunscrypt`. Итог и адрес — в последней строке лога выкатки («Готово:
   https://…»).
 - **Адрес временный**: `sunscrypt.<ip-сервера>.sslip.io` (`PUBLIC_HOST` в
-  `.env` на сервере). Переезд на maximov-tech.ru — сменой `PUBLIC_HOST`.
+  `.env` на сервере). Переезд на `sunscrypt.maximov-tech.ru` — сам, когда появится запись DNS
+  (`infra/public-host.txt`, `docs/OPERATIONS.md`).
 - Секреты сервера (VPS_*, SUNSCRYPT_*) пока лежат в `egeg23/DevUZ-perfect-`
   (GitHub не даёт их перенести). Поэтому после зелёных проверок здесь выкатку
   запускает workflow `sunscrypt-deploy.yml` ветки `sunscrypt` того репозитория

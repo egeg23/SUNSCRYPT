@@ -1,16 +1,22 @@
 # SUNSCRYPT — сайт хостового nginx. Ставит infra/deploy.sh: подставляет адрес
-# (__HOST__) и порт приложения (__PORT__), строки сертификата дописывает
-# certbot. Повторная выкатка меняет в готовом файле только адрес и порт.
+# (__HOST__), все имена сайта (__NAMES__: адрес и прежние адреса) и порт
+# приложения (__PORT__), строки сертификата дописывает certbot. Повторная
+# выкатка меняет в готовом файле только имена и порт.
 server {
     listen 80;
     listen [::]:80;
-    server_name __HOST__;
+    server_name __NAMES__;
 
     # До запуска — закрыто от поиска.
     add_header X-Robots-Tag "noindex, nofollow" always;
     client_max_body_size 5m;
 
     location / {
+        # Прежний адрес — на постоянный (проверка certbot идёт мимо: у неё
+        # своя точная location).
+        if ($host != "__HOST__") {
+            return 301 https://__HOST__$request_uri;
+        }
         proxy_pass http://127.0.0.1:__PORT__;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

@@ -47,6 +47,11 @@ env_set() {
   printf '%s=%s\n' "$1" "$2" >> "$tmp"
   chmod 600 "$tmp"; mv "$tmp" "$ENV_FILE"
 }
+env_del() {
+  local tmp; tmp="$(mktemp "$APP_DIR/.env.XXXXXX")"
+  grep -vE "^$1=" "$ENV_FILE" > "$tmp" || true
+  chmod 600 "$tmp"; mv "$tmp" "$ENV_FILE"
+}
 # Выкатка кладёт их в .incoming (0600) отдельным коротким шагом: так они не
 # висят в списке процессов сервера всю выкатку. Прочитали — удалили.
 if [ -f "$APP_DIR/.incoming" ]; then
@@ -91,6 +96,27 @@ if [ -z "$(env_get PUBLIC_HOST)" ]; then
   echo "PUBLIC_HOST=sunscrypt.${IP//./-}.sslip.io" >> "$ENV_FILE"
 fi
 PUBLIC_HOST="$(env_get PUBLIC_HOST)"
+SERVER_IP="$(env_get SERVER_IP)"
+
+# Переезд на постоянный адрес (infra/public-host.txt) — только когда его DNS
+# уже указывает на этот сервер: иначе сертификат не выдадут, а сайт пропадёт.
+# Старый адрес остаётся и отправляет на новый. Сертификат не получен —
+# откат на старый (раздел 5).
+WANT_HOST="$(sed -n 's/^host=//p' infra/public-host.txt 2>/dev/null | tr -d '[:space:]')"
+OLD_HOST=""
+if [ -n "$WANT_HOST" ] && [ "$WANT_HOST" != "$PUBLIC_HOST" ]; then
+  WANT_IPS="$(getent ahostsv4 "$WANT_HOST" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  if [ -n "$SERVER_IP" ] && [ "$WANT_IPS" = "$SERVER_IP " ]; then
+    OLD_HOST="$PUBLIC_HOST"
+    env_set PUBLIC_HOST "$WANT_HOST"
+    env_set HOST_ALIASES "$OLD_HOST"
+    PUBLIC_HOST="$WANT_HOST"
+    say "Переезжаю: $OLD_HOST → $PUBLIC_HOST"
+  else
+    say "Постоянный адрес $WANT_HOST ждёт DNS: нужна запись A → ${SERVER_IP:-IP сервера} (сейчас: ${WANT_IPS:-нет}). Пока — $PUBLIC_HOST"
+  fi
+fi
+HOST_ALIASES="$(env_get HOST_ALIASES)"
 
 # ── 3б. Веса модели Kronos ──────────────────────────────────────────────────
 # Не в git. Скачиваем один раз; не вышло — выкатка идёт дальше: сайту веса
@@ -172,12 +198,15 @@ say "Память контейнеров: $(docker stats --no-stream --format '{
 # ── 5. nginx и сертификат ───────────────────────────────────────────────────
 SITE=/etc/nginx/sites-available/sunscrypt
 LINK=/etc/nginx/sites-enabled/sunscrypt
-if [ -f "$SITE" ]; then
+NAMES="$PUBLIC_HOST${HOST_ALIASES:+ $HOST_ALIASES}"
+[ -f "$SITE" ] && cp "$SITE" "$SITE.bak"
+if [ -f "$SITE" ] && [ -z "$OLD_HOST" ]; then
   # certbot уже дописал в файл сертификат — меняем только адрес и порт.
-  cp "$SITE" "$SITE.bak"
-  sed -i -E "s#proxy_pass http://127\.0\.0\.1:[0-9]+;#proxy_pass http://127.0.0.1:$WEB_PORT;#g; s#server_name [^;]+;#server_name $PUBLIC_HOST;#g" "$SITE"
+  sed -i -E "s#proxy_pass http://127\.0\.0\.1:[0-9]+;#proxy_pass http://127.0.0.1:$WEB_PORT;#g; s#server_name [^;]+;#server_name $NAMES;#g" "$SITE"
 else
-  sed -e "s#__HOST__#$PUBLIC_HOST#g" -e "s#__PORT__#$WEB_PORT#g" infra/nginx.conf.template > "$SITE"
+  # Первая выкатка или переезд: файл с нуля, сертификат — заново на все имена.
+  sed -e "s#__HOST__#$PUBLIC_HOST#g" -e "s#__NAMES__#$NAMES#g" -e "s#__PORT__#$WEB_PORT#g" \
+    infra/nginx.conf.template > "$SITE"
 fi
 ln -sf "$SITE" "$LINK"
 if nginx -t 2>/dev/null; then
@@ -188,16 +217,31 @@ else
   die "nginx -t не прошёл — конфиг SUNSCRYPT откатан, остальные сайты не тронуты"
 fi
 
-if ! grep -q ssl_certificate "$SITE"; then
-  if command -v certbot >/dev/null 2>&1; then
-    say "Получаю сертификат для $PUBLIC_HOST"
-    certbot --nginx -d "$PUBLIC_HOST" --non-interactive --agree-tos \
-      --register-unsafely-without-email --redirect \
-      || echo "⚠ сертификат не получен — сайт пока работает по http" >&2
-  else
-    echo "⚠ certbot не установлен — сайт работает по http" >&2
-  fi
+CERT_OK=""
+if grep -q ssl_certificate "$SITE"; then
+  CERT_OK=1
+elif command -v certbot >/dev/null 2>&1; then
+  say "Получаю сертификат для $NAMES"
+  CERT_ARGS=(); for n in $NAMES; do CERT_ARGS+=(-d "$n"); done
+  certbot --nginx "${CERT_ARGS[@]}" --cert-name "$PUBLIC_HOST" --non-interactive \
+    --agree-tos --register-unsafely-without-email --redirect && CERT_OK=1 \
+    || echo "⚠ сертификат не получен" >&2
+else
+  echo "⚠ certbot не установлен — сайт работает по http" >&2
 fi
+if [ -n "$OLD_HOST" ] && [ -z "$CERT_OK" ]; then
+  # Без сертификата не переезжаем: старый файл сайта, старый адрес.
+  say "Переезд отменён — остаюсь на $OLD_HOST"
+  mv "$SITE.bak" "$SITE"
+  env_set PUBLIC_HOST "$OLD_HOST"
+  env_del HOST_ALIASES
+  PUBLIC_HOST="$OLD_HOST"
+  nginx -t 2>/dev/null && systemctl reload nginx
+  "${COMPOSE[@]}" up -d >/dev/null 2>&1 || true  # вернуть ссылкам старый адрес
+elif [ -z "$CERT_OK" ]; then
+  echo "⚠ сайт пока работает по http" >&2
+fi
+rm -f "$SITE.bak"
 
 # ── 6. Что за сервер и пускает ли Bybit ─────────────────────────────────────
 # Для того, кто строит дальше: сколько ресурсов на общем сервере и открыт ли
