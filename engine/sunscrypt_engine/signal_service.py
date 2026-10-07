@@ -188,6 +188,8 @@ class SignalService:
                     log.warning("%s: свечи не получены: %s", sym, e)
                 except Exception:
                     log.exception("%s: сигнал не посчитан", sym)
+                # Bybit ограничивает частоту запросов с одного IP: не всё разом.
+                time.sleep(0.5)
             self.r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": PAIRS,
                                                     "config": CONFIG["version"]}), ex=600)
             # Свеча закрывается в начале часа; Bybit отдаёт её через секунды.
