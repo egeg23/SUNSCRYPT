@@ -102,15 +102,58 @@ class TG:
 
 
 # ── тексты ──────────────────────────────────────────────────────────────────
-def fmt_fill(f: dict, name: str) -> str:
-    side = "Покупка" if f.get("side") == "buy" else "Продажа"
-    liq = "мейкер" if "MAKER" in str(f.get("liquidity", "")).upper() else "тейкер"
-    fee = float(f.get("fee") or 0)
-    return (
-        f"Сделка · {name} ({MODE_RU.get(f.get('mode', 'demo'), f.get('mode'))})\n"
-        f"{side} {f.get('qty')} {f.get('sym')} по {f.get('price')} ({liq}), "
-        f"комиссия {fee:.4f} {f.get('fee_ccy') or 'USDT'}"
+def _usd(v: float) -> str:
+    return f"{v:+.2f} USD".replace("-", "−")
+
+
+def _trades(n: int) -> str:
+    tail = (
+        "сделка"
+        if n % 10 == 1 and n % 100 != 11
+        else ("сделки" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "сделок")
     )
+    return f"{n} {tail}"
+
+
+def _what(f: dict) -> str:
+    """Что сделка сделала с позицией."""
+    before, after, closed = float(f["pos_before"]), float(f["pos_after"]), float(f["closed_qty"])
+    side = lambda q: "лонг" if q > 0 else "шорт"  # noqa: E731
+    if not closed:
+        return f"открыт {side(after)}" if before == 0 else f"добавлено к {side(before)}у"
+    if after == 0:
+        return f"закрыт {side(before)}"
+    if (after > 0) == (before > 0):
+        return f"частично закрыт {side(before)}"
+    return f"закрыт {side(before)}, открыт {side(after)}"
+
+
+def fmt_fill(f: dict, name: str, day_open: float | None = None) -> str:
+    side = "Покупка" if f.get("side") == "buy" else "Продажа"
+    fee = float(f.get("fee") or 0)
+    mode = MODE_RU.get(f.get("mode", "demo"), f.get("mode"))
+    deal = f"{side} {f.get('qty')} {f.get('sym')} по {f.get('price')}"
+    if "net" not in f:  # исполнитель старой версии — без результата
+        return f"Сделка · {name} ({mode})\n{deal}, комиссия {fee:.4f} {f.get('fee_ccy') or 'USDT'}"
+    net = float(f["net"])
+    if float(f["closed_qty"]):
+        icon, head = ("🟢", "Прибыль") if net >= 0 else ("🔴", "Убыток")
+        lines = [
+            f"{icon} {head} {_usd(net)} · {name} ({mode})",
+            f"{deal} — {_what(f)} (вход {float(f['entry_px']):g})",
+            f"Результат {_usd(float(f['pnl']))}, комиссия {fee:.2f} → {_usd(net)}",
+        ]
+    else:
+        lines = [
+            f"⚪ {_what(f).capitalize()} · {name} ({mode})",
+            f"{deal} (≈ {float(f['qty']) * float(f['price']):,.0f} USD)".replace(",", " "),
+            f"Комиссия {_usd(-fee)}; прибыль или убыток — при закрытии",
+        ]
+    day_net, day_n = float(f["day_net"]), int(f["day_fills"])
+    lines.append(f"Итог дня по сделкам: {_usd(day_net)} ({_trades(day_n)})")
+    if day_open is not None:
+        lines.append(f"С учётом открытых позиций: {_usd(day_open)}")
+    return "\n".join(lines)
 
 
 async def _hb(aid) -> dict | None:
@@ -140,9 +183,13 @@ async def account_lines(a: ExchangeAccount, day: str) -> list[str]:
             "  позиции: "
             + (", ".join(f"{s} {'+' if q > 0 else ''}{q}" for s, q in pos.items()) or "нет")
         )
+    net = await cache.redis.hgetall(f"daynet:{a.id}:{a.mode}:{day}")
+    if net:
+        n, v = int(net.get(b"n", 0)), float(net.get(b"net", 0))
+        lines.append(f"  итог по сделкам: {_usd(v)} ({_trades(n)}, после комиссий)")
     total = await _day_total(a.id, day)
     if total is not None:
-        lines.append(f"  за сутки (UTC): {total:+.2f} USD после комиссий")
+        lines.append(f"  с учётом открытых позиций: {_usd(total)}")
     return lines
 
 
@@ -242,7 +289,9 @@ async def notify_fill(tg: TG, channel: str, data: dict) -> None:
     async with SessionLocal() as db:
         chat, name = await _chat_of_account(db, aid)
     if chat:
-        await tg.send(chat, fmt_fill(data, name))
+        day = datetime.fromtimestamp(int(data.get("ts") or 0) / 1000 or time.time(), UTC)
+        day_open = await _day_total(aid, day.strftime("%Y%m%d"))
+        await tg.send(chat, fmt_fill(data, name, day_open))
         if data.get("ts"):  # от исполнения на бирже до отправки в Telegram (бриф: < 5 с)
             log.info(
                 "сделка %s → Telegram за %.1f с",

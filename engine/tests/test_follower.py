@@ -71,6 +71,7 @@ class Scripted(FollowerStrategy):
 
     script: dict[int, callable] = {}
     seen: list[tuple[int, float]] = []
+    realized = 0.0
 
     def _tick(self, event=None):
         minute = (self.clock.timestamp_ns() - T0) // MIN
@@ -78,6 +79,7 @@ class Scripted(FollowerStrategy):
             self.script.pop(m)(self.r)
         super()._tick(event)
         self.seen.append((minute, float(self.portfolio.net_position(IID))))
+        Scripted.realized = float(self.portfolio.realized_pnl(IID) or 0)
 
 
 @pytest.fixture
@@ -85,7 +87,7 @@ def run():
     def _run(script, minutes=240, leverage=1.0, execution="maker", daily_loss_pct=50, max_drawdown_pct=60,
              r=None):
         r = r if r is not None else fakeredis.FakeRedis()
-        Scripted.script, Scripted.seen = dict(script), []
+        Scripted.script, Scripted.seen, Scripted.realized = dict(script), [], 0.0
         engine = BacktestEngine(BacktestEngineConfig(trader_id=TraderId("BT-001")))
         engine.add_venue(venue=Venue("BYBIT"), oms_type=OmsType.NETTING, account_type=AccountType.MARGIN,
                          base_currency=None, starting_balances=[Money(100_000, Currency.from_str("USDT"))],
@@ -121,6 +123,38 @@ def test_follows_long_then_short_then_emergency_stop(run):
     assert hb["halted"] == "кабинет остановлен" and hb["positions"] == {}
     fills = r.xrange(keys.FILLS.format(id="a1"))
     assert len(fills) >= 3 and all(f[1][b"price"] for f in fills)
+
+
+def test_each_fill_carries_its_result_and_day_total(run):
+    """Результат сделок (для Telegram) сходится с тем, что считает Nautilus."""
+    r = fakeredis.FakeRedis()
+    published = []
+    real_publish = r.publish
+    r.publish = lambda ch, msg: (published.append(json.loads(msg)), real_publish(ch, msg))[1]
+    run({
+        1: lambda r: signal(r, 0, +1),
+        60: lambda r: signal(r, 60, -1),
+        150: lambda r: r.set(keys.STOP_ACCOUNT.format(id="a1"), "1"),
+    }, r=r)
+    fills = [m for m in published if m["type"] == "fill"]
+    assert len(fills) >= 3
+    assert fills[0]["closed_qty"] == 0 and fills[0]["net"] < 0  # открытие: только комиссия
+    closing = [f for f in fills if f["closed_qty"] > 0]
+    assert closing and all(f["entry_px"] for f in closing)
+    assert fills[-1]["pos_after"] == pytest.approx(0, abs=1e-9)
+    assert fills[-1]["day_fills"] == len(fills)
+    assert fills[-1]["day_net"] == pytest.approx(sum(f["net"] for f in fills), abs=0.01)
+    assert fills[-1]["day_net"] == pytest.approx(Scripted.realized, abs=0.05)
+
+
+def test_apply_fill_average_price():
+    from sunscrypt_engine.follower import apply_fill
+
+    assert apply_fill(0, 0, 1, 2, 100) == (2, 100, 0, 0)
+    assert apply_fill(2, 100, 1, 2, 110) == (4, 105, 0, 0)  # докупка — средняя
+    assert apply_fill(4, 105, -1, 1, 115) == (3, 105, 1, 10)  # частичное закрытие
+    assert apply_fill(3, 105, -1, 5, 95) == (-2, 95, 3, -30)  # переворот
+    assert apply_fill(-2, 95, 1, 2, 90) == (0, 0, 2, 10)  # шорт закрыт в плюс
 
 
 def test_flat_signal_and_stale_signal(run):

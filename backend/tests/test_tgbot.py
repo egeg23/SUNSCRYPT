@@ -135,3 +135,53 @@ def test_owner_invites_from_telegram(client, monkeypatch):
     assert "/invite?token=" in fake.sent[-1][1]
     invites = client.get("/api/admin/invites").json()
     assert any(i["note"] == "для Ивана" for i in invites)
+
+
+def test_fill_message_shows_result_and_day_total():
+    base = {"sym": "ADAUSDT", "price": "0.6500", "fee_ccy": "USDT", "mode": "demo", "day_fills": 7}
+    close = {
+        **base,
+        "side": "sell",
+        "qty": "778",
+        "fee": "0.10",
+        "pos_before": 778.0,
+        "pos_after": 0.0,
+        "closed_qty": 778.0,
+        "entry_px": 0.63,
+        "pnl": 15.56,
+        "net": 15.46,
+        "day_net": 42.3,
+    }
+    text = tgbot.fmt_fill(close, "Мой демо", day_open=-3.5)
+    assert text.splitlines() == [
+        "🟢 Прибыль +15.46 USD · Мой демо (демо)",
+        "Продажа 778 ADAUSDT по 0.6500 — закрыт лонг (вход 0.63)",
+        "Результат +15.56 USD, комиссия 0.10 → +15.46 USD",
+        "Итог дня по сделкам: +42.30 USD (7 сделок)",
+        "С учётом открытых позиций: −3.50 USD",
+    ]
+    loss = {**close, "pos_after": -100.0, "pnl": -5.0, "net": -5.1, "day_fills": 1, "day_net": -5.1}
+    text = tgbot.fmt_fill(loss, "Мой демо")
+    assert text.startswith("🔴 Убыток −5.10 USD")
+    assert "закрыт лонг, открыт шорт" in text and "(1 сделка)" in text
+    opened = {
+        **base,
+        "side": "buy",
+        "qty": "1000",
+        "fee": "0.13",
+        "pos_before": 0.0,
+        "pos_after": 1000.0,
+        "closed_qty": 0.0,
+        "entry_px": None,
+        "pnl": 0.0,
+        "net": -0.13,
+        "day_net": -0.13,
+        "day_fills": 2,
+    }
+    text = tgbot.fmt_fill(opened, "Мой демо")
+    assert text.splitlines()[:3] == [
+        "⚪ Открыт лонг · Мой демо (демо)",
+        "Покупка 1000 ADAUSDT по 0.6500 (≈ 650 USD)",
+        "Комиссия −0.13 USD; прибыль или убыток — при закрытии",
+    ]
+    assert "(2 сделки)" in text

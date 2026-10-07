@@ -9,6 +9,7 @@ STOP_GLOBAL = "stop:global"  # аварийная остановка всех к
 STOP_ACCOUNT = "stop:acct:{id}"  # аварийная остановка / выключение кабинета
 FILLS = "fills:{id}"  # исполнения кабинета (поток, читает диспетчер)
 DAY_TOTAL = "daytotal:{id}:{day}"  # PnL кабинета за сутки UTC (все процессы)
+DAY_NET = "daynet:{id}:{mode}:{day}"  # итог сделок за сутки UTC: net (USD после комиссий), n
 DAY_HALT = "dayhalt:{id}:{day}"  # дневной лимит сработал — стоим до конца суток
 LIVE = "live:{id}"  # события кабинета для браузера (pub/sub): fill, hb
 PAUSE_KRONOS = "pause:kronos"  # контроль дрейфа поставил Kronos на паузу (причина)

@@ -10,6 +10,9 @@
    рыночным ордером. Мелкие подстройки (< 25 % позиции) не делаются.
 3. Сердцебиение в Redis: позиции, PnL, состояние.
 
+На каждую сделку — её результат (закрытая часть позиции против средней цены
+входа, минус комиссия) и итог сделок за сутки UTC: для уведомлений.
+
 Объём на пару = капитал × плечо / число пар; плечо ≤ 2 (бриф, правило 4).
 Перезапуск безопасен: цель пересчитывается из сигнала, а не из памяти.
 """
@@ -83,11 +86,17 @@ class FollowerStrategy(Strategy):
         self.order_born: dict[str, float] = {}  # client_order_id → время постановки
         self.target_since: dict[str, tuple[int, float]] = {}  # sym → (target, с какого момента)
         self.maker_rejects: dict[str, int] = {}  # sym → отказы post-only подряд
+        self.book: dict[str, tuple[float, float]] = {}  # sym → (позиция со знаком, средняя цена входа)
 
     # ── жизненный цикл ──────────────────────────────────────────────────────
     def on_start(self) -> None:
         for iid in self.cfg.instrument_ids:
             self.subscribe_quotes(iid)
+            # Позиции на бирже к старту уже сверены узлом — с них и считаем.
+            q, avg = 0.0, 0.0
+            for p in self.cache.positions_open(instrument_id=iid):
+                q, avg = q + float(p.signed_qty), float(p.avg_px_open)
+            self.book[sym_of(iid)] = (q, avg)
         self.clock.set_timer("tick", _secs(TICK_SECS), callback=self._tick)
 
     def on_stop(self) -> None:
@@ -117,9 +126,44 @@ class FollowerStrategy(Strategy):
             "mode": self.cfg.mode,
         }
         self.r.xadd(keys.FILLS.format(id=self.cfg.account_id), fill, maxlen=50000, approximate=True)
-        # Сразу в браузер (дашборд, этап 6): сделка и новое состояние позиций.
-        self.r.publish(keys.LIVE.format(id=self.cfg.account_id), json.dumps({"type": "fill", **fill}))
+        # Сразу в браузер (дашборд, этап 6) и в Telegram: сделка, её
+        # результат и итог дня.
+        self.r.publish(
+            keys.LIVE.format(id=self.cfg.account_id),
+            json.dumps({"type": "fill", **fill, **self._fill_result_safe(fill)}),
+        )
         self._heartbeat()
+
+    def _fill_result_safe(self, fill: dict) -> dict:
+        try:
+            return self._fill_result(fill)
+        except Exception as e:  # сделка в журнале важнее подсчёта для уведомления
+            self.log.warning(f"результат сделки не посчитан: {e!r}")
+            return {}
+
+    def _fill_result(self, fill: dict) -> dict:
+        sym, qty, px = fill["sym"], float(fill["qty"]), float(fill["price"])
+        sign = 1.0 if fill["side"] == "buy" else -1.0
+        q, avg = self.book.get(sym, (0.0, 0.0))
+        q2, avg2, closed, gross = apply_fill(q, avg, sign, qty, px)
+        self.book[sym] = (q2, avg2)
+        fee = float(fill["fee"] or 0) if fill["fee_ccy"] in ("", "USDT") else 0.0
+        net = gross - fee
+        day = time.strftime("%Y%m%d", time.gmtime(int(fill["ts"]) / 1000))
+        key = keys.DAY_NET.format(id=self.cfg.account_id, mode=self.cfg.mode, day=day)
+        day_net = float(self.r.hincrbyfloat(key, "net", net))
+        day_n = int(self.r.hincrby(key, "n", 1))
+        self.r.expire(key, 3 * 86400)
+        return {
+            "pos_before": q,
+            "pos_after": q2,
+            "closed_qty": closed,
+            "pnl": round(gross, 4),
+            "net": round(net, 4),
+            "entry_px": avg if closed else None,
+            "day_net": round(day_net, 4),
+            "day_fills": day_n,
+        }
 
     # ── основной цикл ───────────────────────────────────────────────────────
     def _tick(self, _event=None) -> None:
@@ -276,6 +320,23 @@ class FollowerStrategy(Strategy):
         }
         self.r.set(keys.HB_ACCOUNT.format(id=self.cfg.account_id), json.dumps(hb), ex=120)
         self.r.publish(keys.LIVE.format(id=self.cfg.account_id), json.dumps({"type": "hb", **hb}))
+
+
+def apply_fill(q: float, avg: float, sign: float, qty: float, px: float):
+    """Сделка против позиции по средней цене входа (линейный контракт в USDT).
+
+    → (новая позиция, новая средняя, закрытый объём, результат закрытой части
+    до комиссии).
+    """
+    if q == 0 or (q > 0) == (sign > 0):
+        new = q + sign * qty
+        return new, (abs(q) * avg + qty * px) / abs(new), 0.0, 0.0
+    closed = min(abs(q), qty)
+    gross = (px - avg) * closed * (1.0 if q > 0 else -1.0)
+    new = q + sign * qty
+    if abs(new) < 1e-9:
+        return 0.0, 0.0, closed, gross
+    return new, (avg if (new > 0) == (q > 0) else px), closed, gross
 
 
 def _secs(s: int):
