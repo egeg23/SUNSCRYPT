@@ -160,6 +160,9 @@ class ExchangeAccount(Base):
     # пусто — min(баланс, 1000).
     capital_usd: Mapped[float | None] = mapped_column(Float)
     daily_loss_pct: Mapped[float] = mapped_column(Float, default=5.0, server_default="5")
+    # Лимит просадки от пика результата стратегии, % капитала (движок стоит до
+    # решения человека).
+    max_drawdown_pct: Mapped[float] = mapped_column(Float, default=40.0, server_default="40")
     created_at: Mapped[datetime] = _now_col()
 
 

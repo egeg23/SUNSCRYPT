@@ -26,6 +26,7 @@ type Account = {
   leverage: number;
   capital_usd: number | null;
   daily_loss_pct: number;
+  max_drawdown_pct: number;
   keys: Record<"demo" | "real", { key_tail: string; status: string; status_detail: string | null; equity_usd: number | null } | null>;
 };
 
@@ -37,6 +38,7 @@ type Engine = {
     halted: string | null;
     open_orders: number;
   } | null;
+  drawdown_halt: string | null;
   reconcile: { ts: number; bybit: number; journal: number; added: number; extra: number } | null;
   equity: { ts: string; usd: number } | null;
   trades: { ts: string; sym: string; side: string; qty: number; price: number; fee: number; liquidity: string | null; source: string }[];
@@ -125,6 +127,15 @@ function EnginePanel({ a }: { a: Account }) {
   }, [a.id]);
   if (!e) return null;
   const hb = e.heartbeat;
+  const resetDrawdown = async () => {
+    let code: string | null = null;
+    if (a.mode === "real") {
+      code = prompt("Реальный счёт: код 2FA, чтобы снять остановку по просадке");
+      if (!code) return;
+    } else if (!confirm("Снять остановку по просадке? Торговля продолжится, просадка дальше считается от текущего результата.")) return;
+    await api(`/accounts/${a.id}/drawdown-reset`, { code });
+    setE(await api<Engine>(`/accounts/${a.id}/engine`));
+  };
   // eslint-disable-next-line react-hooks/purity -- возраст сердцебиения считается при каждой отрисовке
   const alive = hb !== null && Date.now() - hb.ts < 60000;
   return (
@@ -139,6 +150,14 @@ function EnginePanel({ a }: { a: Account }) {
           <span className="muted">выключен</span>
         )}
       </div>
+      {e.drawdown_halt ? (
+        <div className="err" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span>⏹ Остановлен по лимиту просадки: {e.drawdown_halt}.</span>
+          <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }} onClick={resetDrawdown}>
+            Снять и продолжить
+          </button>
+        </div>
+      ) : null}
       {alive ? (
         <div className="muted">
           Позиции:{" "}
@@ -206,6 +225,7 @@ function TradingSettings({ a, reload }: { a: Account; reload: () => void }) {
             leverage: Number(f.get("leverage")),
             capital_usd: f.get("capital_usd") ? Number(f.get("capital_usd")) : null,
             daily_loss_pct: Number(f.get("daily_loss_pct")),
+            max_drawdown_pct: Number(f.get("max_drawdown_pct")),
           }, "PATCH");
           reload();
         });
@@ -227,6 +247,10 @@ function TradingSettings({ a, reload }: { a: Account; reload: () => void }) {
         <label>
           Дневной лимит убытка, %
           <input name="daily_loss_pct" type="number" min={0.5} max={50} step={0.5} defaultValue={a.daily_loss_pct} />
+        </label>
+        <label title="Просадка от пика результата стратегии в % капитала. Сработал — позиции закрываются, торговля стоит до вашего решения.">
+          Лимит просадки, %
+          <input name="max_drawdown_pct" type="number" min={5} max={60} step={1} defaultValue={a.max_drawdown_pct} />
         </label>
       </div>
       {error ? <p className="err">{error}</p> : null}

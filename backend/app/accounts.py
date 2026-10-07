@@ -65,11 +65,16 @@ class StopIn(BaseModel):
     stopped: bool
 
 
+class CodeIn(BaseModel):
+    code: str | None = Field(default=None, pattern=r"^\d{6}$")
+
+
 class SettingsIn(BaseModel):
     trading_enabled: bool | None = None
     leverage: float | None = Field(default=None, gt=0, le=safety.MAX_LEVERAGE)
     capital_usd: float | None = Field(default=None, ge=50, le=10_000_000)
     daily_loss_pct: float | None = Field(default=None, ge=0.5, le=50)
+    max_drawdown_pct: float | None = Field(default=None, ge=5, le=60)
 
 
 class ModeIn(BaseModel):
@@ -136,6 +141,7 @@ def _view(a: ExchangeAccount, keys: dict[str, AccountKey]) -> dict:
         "leverage": a.leverage,
         "capital_usd": a.capital_usd,
         "daily_loss_pct": a.daily_loss_pct,
+        "max_drawdown_pct": a.max_drawdown_pct,
         "keys": {m: _key_view(keys.get(m)) for m in ("demo", "real")},
         # Для совместимости с карточкой: данные активного ключа.
         "key_tail": active.key_tail if active else None,
@@ -307,13 +313,14 @@ async def settings(account_id: uuid.UUID, body: SettingsIn, cur: Owner2FA, db: D
         if a.mode == "real" and not await _real_allowed(db):
             raise _problem(REAL_OFF)
     if a.mode == "real":
-        for field in ("leverage", "capital_usd", "daily_loss_pct"):
+        for field in ("leverage", "capital_usd", "daily_loss_pct", "max_drawdown_pct"):
             v, cur_v = getattr(body, field), getattr(a, field)
             if v is not None and (cur_v is None or v > cur_v):
                 raise _problem(
                     f"Поднять плечо или лимиты реального счёта: {REAL_SWITCH}. Снизить можно здесь."
                 )
-    for field in ("trading_enabled", "leverage", "capital_usd", "daily_loss_pct"):
+    fields = ("trading_enabled", "leverage", "capital_usd", "daily_loss_pct", "max_drawdown_pct")
+    for field in fields:
         v = getattr(body, field)
         if v is not None:
             setattr(a, field, v)
@@ -367,6 +374,33 @@ async def switch_mode(account_id: uuid.UUID, body: ModeIn, cur: Owner2FA, db: Db
     return _view(a, keys)
 
 
+async def _dd_halt(a: ExchangeAccount) -> str | None:
+    try:
+        v = await redis.get(f"ddhalt:{a.id}:{a.mode}")
+    except Exception:
+        return None
+    return v.decode() if v else None
+
+
+@router.post("/{account_id}/drawdown-reset")
+async def drawdown_reset(account_id: uuid.UUID, body: CodeIn, cur: Owner2FA, db: Db) -> dict:
+    """Снять остановку по лимиту просадки: торговля продолжится, просадка
+    дальше считается от текущего результата. На реальном счёте — со свежим
+    кодом 2FA."""
+    a = await _own(db, cur, account_id)
+    if a.mode == "real":
+        await enforce(f"2fa:user:{cur.user.id}", 8, 900)
+        if not body.code or not check_totp(cur.user, body.code):
+            await db.commit()
+            raise _problem("Неверный код 2FA. Для реального счёта нужен свежий код.")
+    total = await redis.get(f"total:{a.id}:{a.mode}")
+    await redis.set(f"peak:{a.id}:{a.mode}", total or b"0")
+    await redis.delete(f"ddhalt:{a.id}:{a.mode}")
+    await _event(db, a, "resume", "Остановка по лимиту просадки снята")
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/{account_id}/engine")
 async def engine_state(account_id: uuid.UUID, cur: Viewer, db: Db) -> dict:
     """Что делает движок по кабинету: процесс, позиции, сделки, события."""
@@ -398,6 +432,7 @@ async def engine_state(account_id: uuid.UUID, cur: Viewer, db: Db) -> dict:
     last_eq = eq.first()
     return {
         "heartbeat": hb,
+        "drawdown_halt": await _dd_halt(a),
         "reconcile": recon,
         "equity": {"ts": last_eq.ts.isoformat(), "usd": last_eq.equity_usd} if last_eq else None,
         "trades": [

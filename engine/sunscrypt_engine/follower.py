@@ -42,6 +42,7 @@ class FollowerConfig(StrategyConfig):
         capital_usd: float,
         leverage: float = 1.0,
         daily_loss_pct: float = 5.0,
+        max_drawdown_pct: float = 40.0,
         execution: str = "maker",
         mode: str = "demo",
         **_kw: object,
@@ -55,6 +56,7 @@ class FollowerConfig(StrategyConfig):
         self.capital_usd = capital_usd
         self.leverage = leverage
         self.daily_loss_usd = capital_usd * daily_loss_pct / 100
+        self.max_drawdown_usd = capital_usd * max_drawdown_pct / 100
         self.execution = execution
         self.mode = mode
 
@@ -72,6 +74,8 @@ class FollowerStrategy(Strategy):
         self.day: str | None = None
         self.day_start_pnl = 0.0
         self.carry = 0.0
+        self.total_carry: float | None = None  # результат прежних процессов
+        self.total_start = 0.0
         self.order_born: dict[str, float] = {}  # client_order_id → время постановки
         self.target_since: dict[str, tuple[int, float]] = {}  # sym → (target, с какого момента)
 
@@ -138,11 +142,27 @@ class FollowerStrategy(Strategy):
         halt_key = keys.DAY_HALT.format(id=aid, day=day)
         if day_total < -self.cfg.daily_loss_usd and not self.r.exists(halt_key):
             self.r.set(halt_key, f"дневной лимит убытка ({day_total:.2f} USD)", ex=2 * 86400)
+        # Просадка от пика результата стратегии (не только за сутки: плохие
+        # периоды у моментума — череда умеренно плохих дней). Держится до
+        # решения человека (снятие остановки кабинета).
+        mode = self.cfg.mode
+        if self.total_carry is None:
+            self.total_carry = float(self.r.get(keys.TOTAL.format(id=aid, mode=mode)) or 0)
+            self.total_start = pnl
+        total = self.total_carry + pnl - self.total_start
+        peak = max(float(self.r.get(keys.PEAK.format(id=aid, mode=mode)) or 0), total)
+        self.r.set(keys.TOTAL.format(id=aid, mode=mode), total)
+        self.r.set(keys.PEAK.format(id=aid, mode=mode), peak)
+        dd_key = keys.DD_HALT.format(id=aid, mode=mode)
+        if peak - total > self.cfg.max_drawdown_usd and not self.r.exists(dd_key):
+            self.r.set(dd_key, f"лимит просадки: −{peak - total:.2f} USD от пика (>{self.cfg.max_drawdown_usd:.0f})")
         reason = None
         if self.r.get(keys.STOP_GLOBAL) == b"1":
             reason = "общая аварийная остановка"
         elif self.r.get(keys.STOP_ACCOUNT.format(id=aid)) == b"1":
             reason = "кабинет остановлен"
+        elif (h := self.r.get(dd_key)) is not None:
+            reason = h.decode()
         elif (h := self.r.get(halt_key)) is not None:
             reason = h.decode()  # держится до конца суток UTC, и после перезапуска
         if reason:

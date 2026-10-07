@@ -82,7 +82,7 @@ class Orchestrator:
 
     # ── процессы ────────────────────────────────────────────────────────────
     def _fingerprint(self, a: ExchangeAccount, capital: float) -> str:
-        return f"{a.mode}|{a.leverage}|{capital}|{a.daily_loss_pct}|{PAIRS}|{self.key_tails.get(str(a.id))}"
+        return f"{a.mode}|{a.leverage}|{capital}|{a.daily_loss_pct}|{a.max_drawdown_pct}|{PAIRS}|{self.key_tails.get(str(a.id))}"
 
     async def _capital(self, a: ExchangeAccount) -> float:
         if a.capital_usd:
@@ -109,6 +109,7 @@ class Orchestrator:
             "SUNS_CAPITAL_USD": str(capital),
             "SUNS_LEVERAGE": str(safety.check_leverage(a.leverage)),
             "SUNS_DAILY_LOSS_PCT": str(a.daily_loss_pct),
+            "SUNS_MAX_DD_PCT": str(a.max_drawdown_pct),
         }
         if a.mode == "real" and real_ok:
             env["SUNS_REAL_CONFIRMED"] = "yes"

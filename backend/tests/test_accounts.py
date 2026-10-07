@@ -241,3 +241,24 @@ def test_new_account_with_real_key_starts_in_demo(client):
     r = add(client, key="REALk3y1112223", mode="real")
     assert r.status_code == 201, r.text
     assert r.json()["mode"] == "demo" and r.json()["keys"]["real"]["key_tail"] == "2223"
+
+
+def test_drawdown_limit_setting_and_reset(client):
+    import redis
+
+    user_with_2fa(client)
+    acc = add(client).json()
+    assert acc["max_drawdown_pct"] == 40
+    r = client.patch(f"/api/accounts/{acc['id']}/settings", json={"max_drawdown_pct": 25})
+    assert r.json()["max_drawdown_pct"] == 25
+    url = f"/api/accounts/{acc['id']}/settings"
+    assert client.patch(url, json={"max_drawdown_pct": 90}).status_code == 422
+    rd = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    rd.set(f"ddhalt:{acc['id']}:demo", "лимит просадки: −300 USD")
+    rd.set(f"total:{acc['id']}:demo", "-300")
+    rd.set(f"peak:{acc['id']}:demo", "0")
+    assert "−300" in client.get(f"/api/accounts/{acc['id']}/engine").json()["drawdown_halt"]
+    assert client.post(f"/api/accounts/{acc['id']}/drawdown-reset", json={}).json()["ok"]
+    assert rd.get(f"ddhalt:{acc['id']}:demo") is None
+    assert float(rd.get(f"peak:{acc['id']}:demo")) == -300  # просадка — от текущего результата
+    assert client.get(f"/api/accounts/{acc['id']}/engine").json()["drawdown_halt"] is None

@@ -45,6 +45,13 @@ async def problems(redis) -> dict[str, tuple[str | None, str]]:
             if age is None or age > HB_STALE_S:
                 when = f"{age / 60:.0f} мин" if age is not None else "давно"
                 out[f"hb:{aid}"] = (aid, f"Исполнитель кабинета {tag} молчит ({when})")
+            dd = await redis.get(f"ddhalt:{aid}:{a.mode}")
+            if dd:
+                out[f"dd:{aid}"] = (
+                    aid,
+                    f"Кабинет {tag} остановлен по лимиту просадки ({dd.decode()}); "
+                    "снять — кнопкой в разделе «Bybit»",
+                )
             rec = await redis.get(f"recon:{aid}")
             if rec:
                 r = json.loads(rec)

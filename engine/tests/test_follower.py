@@ -80,7 +80,8 @@ class Scripted(FollowerStrategy):
 
 @pytest.fixture
 def run():
-    def _run(script, minutes=240, leverage=1.0, execution="maker", daily_loss_pct=50, r=None):
+    def _run(script, minutes=240, leverage=1.0, execution="maker", daily_loss_pct=50, max_drawdown_pct=60,
+             r=None):
         r = r if r is not None else fakeredis.FakeRedis()
         Scripted.script, Scripted.seen = dict(script), []
         engine = BacktestEngine(BacktestEngineConfig(trader_id=TraderId("BT-001")))
@@ -92,7 +93,8 @@ def run():
         engine.add_data(quotes(minutes))
         engine.add_strategy(Scripted(FollowerConfig(
             account_id="a1", instrument_ids=[IID], redis=r, capital_usd=10_000,
-            leverage=leverage, daily_loss_pct=daily_loss_pct, execution=execution)))
+            leverage=leverage, daily_loss_pct=daily_loss_pct, max_drawdown_pct=max_drawdown_pct,
+            execution=execution)))
         engine.run()
         seen = list(Scripted.seen)
         engine.dispose()
@@ -148,3 +150,19 @@ def test_daily_loss_halt_survives_restart(run):
     # «Перезапуск» в те же сутки: новый процесс, та же Redis — стоит.
     _, seen2 = run({1: lambda r: signal(r, 0, +1)}, minutes=60, daily_loss_pct=0.01, r=r)
     assert all(p == 0 for _, p in seen2)
+
+
+def test_drawdown_halt_holds_until_reset_and_across_restarts(run):
+    # Лимит 0.01 % от 10 000 = 1 USD от пика: первая комиссия его съедает.
+    r, seen = run({1: lambda r: signal(r, 0, +1)}, minutes=60, max_drawdown_pct=0.01)
+    assert max(p for _, p in seen) > 0 and seen[-1][1] == 0
+    msg = r.get("ddhalt:a1:demo").decode()
+    assert "лимит просадки" in msg and float(r.get("total:a1:demo")) < 0
+    # Новый процесс (и новые сутки — не важно): стоит, пока человек не снимет.
+    _, seen2 = run({1: lambda r: signal(r, 0, +1)}, minutes=60, max_drawdown_pct=0.01, r=r)
+    assert all(p == 0 for _, p in seen2)
+    # Снятие (как в API): пик = текущий результат, ключ удалён — снова торгует.
+    r.set("peak:a1:demo", r.get("total:a1:demo"))
+    r.delete("ddhalt:a1:demo")
+    _, seen3 = run({1: lambda r: signal(r, 0, +1)}, minutes=60, max_drawdown_pct=60, r=r)
+    assert max(p for _, p in seen3) > 0
