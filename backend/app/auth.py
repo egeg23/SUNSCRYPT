@@ -433,6 +433,7 @@ async def me(cur: CurrentAny) -> dict:
         "totp_enabled": u.totp_enabled_at is not None,
         "mfa_passed": cur.session.mfa_passed,
         "is_admin": u.is_admin,
+        "telegram_linked": u.telegram_chat_id is not None,
     }
 
 

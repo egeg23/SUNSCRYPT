@@ -57,4 +57,5 @@ export type Me = {
   totp_enabled: boolean;
   mfa_passed: boolean;
   is_admin: boolean;
+  telegram_linked: boolean;
 };

@@ -109,6 +109,72 @@ function TwoFactorSetup({ onDone }: { onDone: () => void }) {
   );
 }
 
+function TelegramCard({ me, onChange }: { me: Me; onChange: () => void }) {
+  const [link, setLink] = useState<{ code: string; link: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <div className="card">
+      <h3>Telegram</h3>
+      {me.telegram_linked ? (
+        <>
+          <p className="ok">Бот @SUNSCRYPT_tradebot привязан: сделки, тревоги, дневной отчёт.</p>
+          <p className="muted" style={{ fontSize: 14 }}>
+            Команды: /status, /report, /stop — аварийная остановка ваших кабинетов.
+          </p>
+          <button
+            className="btn ghost"
+            onClick={async () => {
+              await api("/auth/telegram", undefined, "DELETE");
+              onChange();
+            }}
+          >
+            Отвязать
+          </button>
+        </>
+      ) : !me.totp_enabled ? (
+        <p className="muted" style={{ fontSize: 14 }}>
+          Бот умеет останавливать торговлю — сначала включите 2FA.
+        </p>
+      ) : link ? (
+        <>
+          <p style={{ fontSize: 14 }}>
+            Откройте ссылку в Telegram и нажмите «Запустить» — или отправьте боту{" "}
+            <code>/start {link.code}</code>. Код действует 10 минут.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <a className="btn" href={link.link} target="_blank" rel="noreferrer">
+              Открыть Telegram
+            </a>
+            <button className="btn ghost" onClick={onChange}>
+              Я привязал — обновить
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="muted" style={{ fontSize: 14 }}>
+            Уведомления о каждой сделке, тревоги, дневной отчёт и аварийная остановка из чата.
+          </p>
+          <button
+            className="btn"
+            onClick={async () => {
+              try {
+                setLink(await api<{ code: string; link: string }>("/auth/telegram/link", {}));
+                setErr(null);
+              } catch (e) {
+                setErr(e instanceof ApiError ? e.message : "Не получилось");
+              }
+            }}
+          >
+            Привязать Telegram
+          </button>
+        </>
+      )}
+      {err ? <p className="err">{err}</p> : null}
+    </div>
+  );
+}
+
 export default function AccountPage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
@@ -190,6 +256,7 @@ export default function AccountPage() {
               </p>
               <a href="/accounts">Перейти к кабинетам →</a>
             </div>
+            <TelegramCard me={me} onChange={load} />
           </div>
 
           <section>

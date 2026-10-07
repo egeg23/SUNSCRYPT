@@ -207,9 +207,12 @@ for url in https://api.bybit.com/v5/market/time https://api-demo.bybit.com/v5/ma
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || echo "нет ответа")"
   say "Bybit $url → $code"
 done
+# Telegram из России бывает недоступен: 401/404 без токена — значит, связь есть.
+code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://api.telegram.org/bot0/getMe 2>/dev/null || echo "нет ответа")"
+say "Telegram api.telegram.org → $code"
 
 # ── 6б. Движок ──────────────────────────────────────────────────────────────
-for svc in signals orchestrator; do
+for svc in signals orchestrator bot; do
   st="$("${COMPOSE[@]}" ps --format '{{.State}}' "$svc" 2>/dev/null || echo "нет")"
   say "Движок: $svc — $st"
 done

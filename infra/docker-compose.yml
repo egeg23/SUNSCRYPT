@@ -39,6 +39,7 @@ services:
       context: ../backend
       args:
         GIT_COMMIT: ${GIT_COMMIT:-dev}
+    image: sunscrypt-backend
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://sunscrypt:${POSTGRES_PASSWORD:?нет POSTGRES_PASSWORD}@postgres:5432/sunscrypt
@@ -69,6 +70,24 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     mem_limit: 384m
+    logging: *logging
+
+  # Telegram-бот (этап 9): уведомления, тревоги, команды. Образ — тот же,
+  # что у backend. Без токена (секрет SUNSCRYPT_TELEGRAM_TOKEN) — ждёт.
+  bot:
+    image: sunscrypt-backend
+    command: ["python", "-m", "app.tgbot"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://sunscrypt:${POSTGRES_PASSWORD:?нет POSTGRES_PASSWORD}@postgres:5432/sunscrypt
+      REDIS_URL: redis://redis:6379/0
+      PUBLIC_URL: https://${PUBLIC_HOST:-localhost}
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:-}
+      # Если api.telegram.org с сервера закрыт — адрес прокси-зеркала Bot API.
+      TELEGRAM_API: ${TELEGRAM_API:-https://api.telegram.org}
+    depends_on:
+      backend: { condition: service_started }
+    mem_limit: 128m
     logging: *logging
 
   # Движок (этап 4). Сигналы: Kronos раз на всех, решения — в Redis.

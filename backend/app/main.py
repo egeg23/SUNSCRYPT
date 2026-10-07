@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import accounts, admin, auth, safety
+from app import accounts, admin, auth, safety, tgbot
 from app.cache import redis_alive
 from app.config import get_settings
 from app.db import SessionLocal, db_alive, get_session, read_flags
@@ -37,6 +37,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(auth.router)
+app.include_router(tgbot.router)
 app.include_router(admin.router)
 app.include_router(accounts.router)
 
