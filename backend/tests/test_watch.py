@@ -89,10 +89,13 @@ def test_admin_sees_model_history_and_can_resume_pause(client):
     eng.dispose()
     r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
     r.set("pause:kronos", "дрейф")
+    r.set("pause:pair:ADAUSDT", "дрейф пары")
     owner_login(client)
     m = client.get("/api/admin/models").json()
     assert m["champion"] == "ft_small_s300" and m["paused"] == "дрейф"
+    assert m["paused_pairs"] == {"ADAUSDT": "дрейф пары"}
     assert m["events"][0]["reason"] == "Не лучше чемпиона"
     m = client.post("/api/admin/models/resume", json={}).json()
     assert m["paused"] is None and m["events"][0]["action"] == "resumed"
-    assert r.get("pause:kronos") is None
+    assert r.get("pause:kronos") is None and r.get("pause:pair:ADAUSDT") is None
+    assert int(r.get("drift:since:ADAUSDT")) > 0  # дрейф пары считается заново

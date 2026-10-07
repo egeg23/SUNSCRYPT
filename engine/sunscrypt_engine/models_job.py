@@ -323,19 +323,21 @@ def retrain(steps: int, threads: int, today: pd.Timestamp | None = None) -> None
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def live_windows(r: redis.Redis, version: str, since_ms: int) -> list[float]:
-    """Результат каждого 8-часового окна живых сигналов модели после комиссии."""
+def live_windows(r: redis.Redis, version: str, since_ms: int, window_h: int = H,
+                 sym: str | None = None) -> list[float]:
+    """Результат каждого окна решения (8 ч у Kronos, 24 ч у моментума) живых
+    сигналов модели или стратегии после комиссии."""
     by: dict[str, list[dict]] = {}
     for _id, f in r.xrange(keys.SIGNAL_STREAM, min=f"{since_ms}-0"):
         s = json.loads(f[b"json"])
-        if s.get("model") == version and not s.get("paused"):
+        if s.get("model") == version and not s.get("paused") and sym in (None, s["sym"]):
             by.setdefault(s["sym"], []).append(s)
     out = []
     for sigs in by.values():
         sigs.sort(key=lambda s: s["ts_close"])
         prev_target = 0
         for a, b in zip(sigs, sigs[1:], strict=False):
-            if b["ts_close"] - a["ts_close"] != H * 3_600_000:
+            if b["ts_close"] - a["ts_close"] != window_h * 3_600_000:
                 prev_target = 0
                 continue
             out.append(a["target"] * (b["close"] / a["close"] - 1)
@@ -377,6 +379,32 @@ def check_drift(r: redis.Redis | None = None) -> str:
     return text
 
 
+def check_pairs_drift(r: redis.Redis | None = None) -> list[str]:
+    """Дрейф по каждой торгуемой паре (стратегии без модели — моментум):
+    живые дневные результаты против ожидания из проверки при отборе
+    (engine/config/pairs.json → expect). Дрейф → пауза пары."""
+    r = r or _redis()
+    out = []
+    for p in pairs_cfg.load()["pairs"]:
+        exp, sym = p.get("expect"), p["sym"]
+        if not exp or p["strategy"] == "kronos_1h":
+            continue  # Kronos — через чемпиона (check_drift)
+        if r.get(keys.PAUSE_PAIR.format(sym=sym)):
+            out.append(f"{sym}: на паузе")
+            continue
+        # После снятия паузы владельцем — считаем заново (админка ставит отметку).
+        since = int(r.get(f"drift:since:{sym}") or 0)
+        live = live_windows(r, p["strategy"], since, exp["window_h"], sym)
+        bad, text = evalkit.drift(live, exp["mean"], exp["sd"], min_n=20)
+        out.append(f"{sym}: {text}")
+        if bad:
+            r.set(keys.PAUSE_PAIR.format(sym=sym), text)
+            champ = registry.champion()
+            record(f"pair:{sym}", "paused", champ, f"{sym} ({p['strategy']}): {text}. Пара на паузе.",
+                   {"live": len(live)})
+    return out
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser()
@@ -393,6 +421,8 @@ def main() -> None:
             raise
     else:
         print(check_drift())
+        for line in check_pairs_drift():
+            print(line)
 
 
 if __name__ == "__main__":

@@ -38,14 +38,19 @@ def targets_momentum(df: pd.DataFrame) -> pd.Series:
     return np.sign(ret).fillna(0.0)
 
 
-def backtest(df: pd.DataFrame, tgt: pd.Series, period: tuple, fee: float = TAKER) -> dict:
-    """Позиция по решениям, доходность по часовым свечам (индекс — время
-    открытия), комиссия на изменение позиции, фандинг (если есть колонка)."""
+def net_series(df: pd.DataFrame, tgt: pd.Series, fee: float = TAKER) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Почасовой результат после комиссии и фандинга; позиция; её изменения."""
     r = df["close"].pct_change().fillna(0.0)
     pos = tgt.reindex(r.index.union(tgt.index)).ffill().reindex(r.index).fillna(0.0)
     change = pos.diff().abs().fillna(pos.abs())
     fund = df["funding"].fillna(0.0) if "funding" in df else pd.Series(0.0, index=df.index)
-    net = pos * r - change * fee - pos.shift(1).fillna(0.0) * fund
+    return pos * r - change * fee - pos.shift(1).fillna(0.0) * fund, pos, change
+
+
+def backtest(df: pd.DataFrame, tgt: pd.Series, period: tuple, fee: float = TAKER) -> dict:
+    """Позиция по решениям, доходность по часовым свечам (индекс — время
+    открытия), комиссия на изменение позиции, фандинг (если есть колонка)."""
+    net, pos, change = net_series(df, tgt, fee)
     a, b = period
     seg = net.loc[a:b]
     daily = seg.resample("1D").sum()

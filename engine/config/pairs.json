@@ -2,10 +2,55 @@
   "version": "2026-10-07-v1",
   "note": "Отбор этапа 7 по research/selection/RULES.md (правила записаны до расчёта): вал 2024-07…2025-06, тест 2025-07…2026-09, после комиссий 0,075% и фандинга. Отчёт — research/selection/REPORT.md. Kronos не прошёл ни на одной паре.",
   "pairs": [
-    {"sym": "ADAUSDT", "strategy": "momentum_4h"},
-    {"sym": "DOGEUSDT", "strategy": "momentum_4h"},
-    {"sym": "APTUSDT", "strategy": "momentum_4h"},
-    {"sym": "STXUSDT", "strategy": "momentum_4h"},
-    {"sym": "AVAXUSDT", "strategy": "momentum_4h"}
+    {
+      "sym": "ADAUSDT",
+      "strategy": "momentum_4h",
+      "expect": {
+        "window_h": 24,
+        "mean": 0.00272,
+        "sd": 0.0407,
+        "source": "тест 2025-07…2026-09, день после комиссии и фандинга"
+      }
+    },
+    {
+      "sym": "DOGEUSDT",
+      "strategy": "momentum_4h",
+      "expect": {
+        "window_h": 24,
+        "mean": 0.00145,
+        "sd": 0.03969,
+        "source": "тест 2025-07…2026-09, день после комиссии и фандинга"
+      }
+    },
+    {
+      "sym": "APTUSDT",
+      "strategy": "momentum_4h",
+      "expect": {
+        "window_h": 24,
+        "mean": 0.002,
+        "sd": 0.04609,
+        "source": "тест 2025-07…2026-09, день после комиссии и фандинга"
+      }
+    },
+    {
+      "sym": "STXUSDT",
+      "strategy": "momentum_4h",
+      "expect": {
+        "window_h": 24,
+        "mean": 0.00272,
+        "sd": 0.04683,
+        "source": "тест 2025-07…2026-09, день после комиссии и фандинга"
+      }
+    },
+    {
+      "sym": "AVAXUSDT",
+      "strategy": "momentum_4h",
+      "expect": {
+        "window_h": 24,
+        "mean": 0.00214,
+        "sd": 0.04174,
+        "source": "тест 2025-07…2026-09, день после комиссии и фандинга"
+      }
+    }
   ]
 }

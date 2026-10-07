@@ -12,3 +12,4 @@ DAY_TOTAL = "daytotal:{id}:{day}"  # PnL кабинета за сутки UTC (�
 DAY_HALT = "dayhalt:{id}:{day}"  # дневной лимит сработал — стоим до конца суток
 LIVE = "live:{id}"  # события кабинета для браузера (pub/sub): fill, hb
 PAUSE_KRONOS = "pause:kronos"  # контроль дрейфа поставил Kronos на паузу (причина)
+PAUSE_PAIR = "pause:pair:{sym}"  # контроль дрейфа поставил пару на паузу (причина)

@@ -42,3 +42,24 @@ def test_live_windows_net_of_fees_per_pair():
     # 0→8: лонг +10% минус вход; 8→16: шорт −(99/110−1) минус разворот (2 стороны);
     # 16→32 — пропуск окна (разрыв), чужая модель — не считается.
     assert w == pytest.approx([0.1 - fee, -1 * (99 / 110 - 1) - 2 * fee])
+
+
+def test_pair_drift_pauses_only_the_broken_pair(monkeypatch):
+    r = fakeredis.FakeRedis()
+    exp = {"window_h": 24, "mean": 0.002, "sd": 0.04}
+    monkeypatch.setattr(models_job.pairs_cfg, "load", lambda: {"pairs": [
+        {"sym": "AAAUSDT", "strategy": "momentum_4h", "expect": exp},
+        {"sym": "BBBUSDT", "strategy": "momentum_4h", "expect": exp}]})
+    recorded = []
+    monkeypatch.setattr(models_job, "record", lambda *a, **k: recorded.append(a))
+    price = {"AAAUSDT": 100.0, "BBBUSDT": 100.0}
+    for day in range(30):
+        for sym, move in (("AAAUSDT", 0.97), ("BBBUSDT", 1.001)):  # A: −3% каждый день в лонге
+            r.xadd(keys.SIGNAL_STREAM, {"json": json.dumps({
+                "sym": sym, "ts_close": day * 86_400_000, "close": price[sym], "target": 1,
+                "model": "momentum_4h", "paused": False})})
+            price[sym] *= move
+    out = models_job.check_pairs_drift(r)
+    assert r.get(keys.PAUSE_PAIR.format(sym="AAAUSDT")) and not r.get(keys.PAUSE_PAIR.format(sym="BBBUSDT"))
+    assert out[0].startswith("AAAUSDT: Дрейф") and "Без дрейфа" in out[1]
+    assert recorded and recorded[0][1] == "paused"

@@ -9,7 +9,12 @@ import { useSubmit } from "@/lib/useForm";
 
 type InviteRow = { note: string | null; created_at: string; status: string; used_by: string | null };
 type ModelEvent = { ts: string; version: string; action: string; champion: string; reason: string };
-type Models = { champion: string; paused: string | null; events: ModelEvent[] };
+type Models = {
+  champion: string;
+  paused: string | null;
+  paused_pairs: Record<string, string>;
+  events: ModelEvent[];
+};
 const ACTION: Record<string, string> = {
   baseline: "исходная",
   released: "выпущена",
@@ -172,15 +177,20 @@ export default function AdminPage() {
             Раз в сутки живые сигналы сверяются с ожиданием: при сильном отклонении — откат или пауза.
           </span>
         </p>
-        {models?.paused ? (
+        {models && (models.paused || Object.keys(models.paused_pairs).length) ? (
           <div className="card" style={{ maxWidth: 640, marginBottom: 12 }}>
-            <p className="err" style={{ marginTop: 0 }}>⚠ Kronos на паузе: {models.paused}</p>
+            {models.paused ? <p className="err" style={{ marginTop: 0 }}>⚠ Kronos на паузе: {models.paused}</p> : null}
+            {Object.entries(models.paused_pairs).map(([sym, why]) => (
+              <p key={sym} className="err" style={{ marginTop: 0 }}>
+                ⚠ {sym} на паузе: {why}
+              </p>
+            ))}
             <button
               className="btn ghost"
               disabled={busy}
               onClick={() =>
                 run(async () => {
-                  if (!confirm("Снять паузу? Kronos снова начнёт открывать позиции.")) return;
+                  if (!confirm("Снять паузу? Стратегия снова начнёт открывать позиции.")) return;
                   setModels(await api<Models>("/admin/models/resume", {}));
                 })
               }

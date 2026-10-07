@@ -147,10 +147,12 @@ class SignalService:
         if len(df) <= MOMENTUM_H or int((df.index[-1] + bar).value // 1_000_000) != due_ms:
             return None
         ret = float(df["close"].iloc[-1] / df["close"].iloc[-1 - MOMENTUM_H] - 1)
+        paused = self.r.get(keys.PAUSE_PAIR.format(sym=sym))
         return self._publish({
             "sym": sym, "ts_close": due_ms, "bar_minutes": BAR_MIN, "horizon": MOMENTUM_H,
             "close": float(df["close"].iloc[-1]), "rhat": ret, "pup": float(ret > 0), "sd": 0.0,
-            "z": 0.0, "target": int(np.sign(ret)), "model": "momentum_4h",
+            "z": 0.0, "target": 0 if paused else int(np.sign(ret)), "model": "momentum_4h",
+            "paused": bool(paused),
             "created_at": int(time.time() * 1000),
         })
 
@@ -177,7 +179,7 @@ class SignalService:
         rhat, pup, sd = self.fc.rhat(df.iloc[-CONTEXT:])
         hist = [h["rhat"] for h in self._hist(sym) if h["ts"] < ts_ms]
         z = zscore(hist[-Z_WINDOW:], rhat)
-        paused = self.r.get(keys.PAUSE_KRONOS)
+        paused = self.r.get(keys.PAUSE_KRONOS) or self.r.get(keys.PAUSE_PAIR.format(sym=sym))
         sig = {
             "sym": sym,
             "ts_close": ts_ms,

@@ -114,13 +114,18 @@ async def alarms(cur: Admin, db: Db) -> list[dict]:
 async def models(cur: Admin, db: Db) -> dict:
     """Версии модели: текущий чемпион, пауза, история выпусков и отказов."""
     rows = list(await db.scalars(select(ModelEvent).order_by(ModelEvent.id.desc()).limit(100)))
+    paused_pairs: dict[str, str] = {}
     try:
         paused = await redis.get("pause:kronos")
+        async for k in redis.scan_iter(match="pause:pair:*"):
+            v = await redis.get(k)
+            paused_pairs[k.decode().removeprefix("pause:pair:")] = v.decode() if v else ""
     except Exception:
         paused = None
     return {
         "champion": rows[0].champion if rows else "ft_small_s300",
         "paused": paused.decode() if paused else None,
+        "paused_pairs": paused_pairs,
         "events": [
             {
                 "ts": e.ts.isoformat(),
@@ -136,8 +141,14 @@ async def models(cur: Admin, db: Db) -> dict:
 
 @router.post("/models/resume")
 async def models_resume(cur: Admin, db: Db) -> dict:
-    """Снять паузу Kronos, поставленную контролем дрейфа."""
+    """Снять паузы контроля дрейфа (Kronos и пары). Дрейф пары после этого
+    считается заново — с этого момента."""
     await redis.delete("pause:kronos")
+    now_ms = str(int(datetime.now(UTC).timestamp() * 1000))
+    async for k in redis.scan_iter(match="pause:pair:*"):
+        sym = k.decode().removeprefix("pause:pair:")
+        await redis.set(f"drift:since:{sym}", now_ms)
+        await redis.delete(k)
     last = await db.scalar(select(ModelEvent).order_by(ModelEvent.id.desc()).limit(1))
     champ = last.champion if last else "ft_small_s300"
     db.add(
