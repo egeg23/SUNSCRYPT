@@ -105,7 +105,7 @@ SERVER_IP="$(env_get SERVER_IP)"
 WANT_HOST="$(sed -n 's/^host=//p' infra/public-host.txt 2>/dev/null | tr -d '[:space:]')"
 OLD_HOST=""
 if [ -n "$WANT_HOST" ] && [ "$WANT_HOST" != "$PUBLIC_HOST" ]; then
-  WANT_IPS="$(getent ahostsv4 "$WANT_HOST" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  WANT_IPS="$( (getent ahostsv4 "$WANT_HOST" 2>/dev/null || true) | awk '{print $1}' | sort -u | tr '\n' ' ')"
   if [ -n "$SERVER_IP" ] && [ "$WANT_IPS" = "$SERVER_IP " ]; then
     OLD_HOST="$PUBLIC_HOST"
     env_set PUBLIC_HOST "$WANT_HOST"
