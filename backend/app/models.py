@@ -263,7 +263,7 @@ class ModelEvent(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = _now_col(index=True)
     version: Mapped[str] = mapped_column(String(64))
-    # baseline | released | rejected | skipped | rolled_back | paused | resumed | drift_ok
+    # baseline | released | rejected | skipped | failed | rolled_back | paused | resumed
     action: Mapped[str] = mapped_column(String(16))
     champion: Mapped[str] = mapped_column(String(64))  # чемпион после события
     reason: Mapped[str] = mapped_column(String(1000))

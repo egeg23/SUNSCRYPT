@@ -18,6 +18,7 @@ const ACTION: Record<string, string> = {
   rolled_back: "откат",
   paused: "пауза",
   resumed: "пауза снята",
+  failed: "сбой",
 };
 type AlarmRow = { ts: string; kind: "alarm" | "ok"; message: string };
 type UserRow = { id: string; email: string; is_admin: boolean; totp_enabled: boolean; created_at: string };

@@ -41,7 +41,7 @@ log = logging.getLogger("models")
 
 BYBIT = "https://api.bybit.com"
 HOLDOUT_D, VAL_D, TRAIN_D = 28, 28, 365
-CONTEXT, H, S, BATCH = 256, 8, 16, 32
+CONTEXT, H, S, BATCH = 256, 8, 16, 4  # пачка 4 точки × 16 сценариев: ~1 ГБ (32 — 6 ГБ)
 COLS = ["open", "high", "low", "close", "volume", "amount"]
 
 
@@ -144,7 +144,8 @@ def predict(fk, df: pd.DataFrame, since: pd.Timestamp, until: pd.Timestamp) -> p
     return pd.Series(out, dtype=float).sort_index()
 
 
-def finetune(base: str, data: dict, train: tuple, val: tuple, out: str, steps: int, threads: int) -> dict:
+def finetune(base: str, data: dict, train: tuple, val: tuple, out: str, steps: int, threads: int,
+             micro: int = 4) -> dict:
     """Дообучение от чемпиона (токенизатор заморожен, как в исследовании:
     engine/sunscrypt_engine/finetune.py). Сохраняется лучший шаг по val."""
     import math
@@ -181,7 +182,7 @@ def finetune(base: str, data: dict, train: tuple, val: tuple, out: str, steps: i
     for p in tok.parameters():
         p.requires_grad_(False)
     vrng = np.random.default_rng(123)
-    vb = [ft.make_batch(va, vrng, 32, L, W) for _ in range(4)]
+    vb = [ft.make_batch(va, vrng, 8, L, W) for _ in range(16)]  # 128 окон, малыми порциями
 
     def vloss() -> float:
         model.eval()
@@ -199,10 +200,12 @@ def finetune(base: str, data: dict, train: tuple, val: tuple, out: str, steps: i
     model.train()
     t0 = time.time()
     for step in range(1, steps + 1):
-        x, s = ft.make_batch(tr, rng, 16, L, W)
-        loss = ft.loss_on(model, tok, x, s, L)
+        # Пачка 16 окон — частями по micro: память (потолок контейнера 2 ГБ;
+        # целиком 16 окон занимали больше), результат тот же.
         opt.zero_grad()
-        loss.backward()
+        for _ in range(16 // micro):
+            x, s = ft.make_batch(tr, rng, micro, L, W)
+            (ft.loss_on(model, tok, x, s, L) * (micro / 16)).backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 3.0)
         opt.step()
         sched.step()
@@ -382,7 +385,12 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=int(os.environ.get("RETRAIN_THREADS", "2")))
     a = ap.parse_args()
     if a.job == "retrain":
-        retrain(a.steps, a.threads)
+        try:
+            retrain(a.steps, a.threads)
+        except Exception as e:
+            champ = registry.champion()
+            record(champ, "failed", champ, f"Дообучение не завершилось: {type(e).__name__}: {e}"[:500])
+            raise
     else:
         print(check_drift())
 
