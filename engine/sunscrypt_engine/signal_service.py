@@ -24,10 +24,14 @@ import pandas as pd
 import redis
 
 from sunscrypt_engine import keys, market
+from sunscrypt_engine import pairs as pairs_cfg
 
 log = logging.getLogger("signals")
 
-PAIRS = os.environ.get("SIGNAL_PAIRS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT").split(",")
+CONFIG = pairs_cfg.load()
+PAIRS = [p["sym"] for p in CONFIG["pairs"]]
+STRATEGY = {p["sym"]: p["strategy"] for p in CONFIG["pairs"]}
+MOMENTUM_H = 24  # моментум: раз в сутки (00:00 UTC), знак доходности за 24 часа
 BAR_MIN = int(os.environ.get("SIGNAL_BAR_MINUTES", "60"))
 H = int(os.environ.get("SIGNAL_HORIZON", "8"))
 CONTEXT = 256
@@ -101,6 +105,38 @@ class SignalService:
         self.r.ltrim(k, -Z_WINDOW, -1)
 
     def step(self, sym: str, now: float | None = None) -> dict | None:
+        if STRATEGY.get(sym, "kronos_1h") == "momentum_4h":
+            return self.step_momentum(sym, now)
+        return self.step_kronos(sym, now)
+
+    def _publish(self, sig: dict) -> dict:
+        self.r.set(keys.SIGNAL.format(sym=sig["sym"]), json.dumps(sig))
+        self.r.xadd(keys.SIGNAL_STREAM, {"json": json.dumps(sig)}, maxlen=20000, approximate=True)
+        log.info("%s: %s rhat=%+.4f z=%+.2f → %+d", sig["sym"], sig["model"], sig["rhat"], sig["z"], sig["target"])
+        return sig
+
+    def step_momentum(self, sym: str, now: float | None = None) -> dict | None:
+        """Моментум без модели (бриф, кандидат этапа 7): раз в сутки позиция =
+        знак доходности за последние 24 часа, всегда в рынке."""
+        period_ms = MOMENTUM_H * BAR_MIN * 60_000
+        due_ms = int((now if now is not None else time.time()) * 1000) // period_ms * period_ms
+        last = self.r.get(keys.SIGNAL.format(sym=sym))
+        if last and json.loads(last)["ts_close"] >= due_ms:
+            return None
+        df = self.fetch(sym, BAR_MIN, 200)
+        bar = pd.Timedelta(minutes=BAR_MIN)
+        df = df[df.index + bar <= pd.Timestamp(due_ms, unit="ms")]
+        if len(df) <= MOMENTUM_H or int((df.index[-1] + bar).value // 1_000_000) != due_ms:
+            return None
+        ret = float(df["close"].iloc[-1] / df["close"].iloc[-1 - MOMENTUM_H] - 1)
+        return self._publish({
+            "sym": sym, "ts_close": due_ms, "bar_minutes": BAR_MIN, "horizon": MOMENTUM_H,
+            "close": float(df["close"].iloc[-1]), "rhat": ret, "pup": float(ret > 0), "sd": 0.0,
+            "z": 0.0, "target": int(np.sign(ret)), "model": "momentum_4h",
+            "created_at": int(time.time() * 1000),
+        })
+
+    def step_kronos(self, sym: str, now: float | None = None) -> dict | None:
         """Новое решение по паре, если закрылась решающая свеча и его ещё нет."""
         period_ms = H * BAR_MIN * 60_000
         due_ms = int((now if now is not None else time.time()) * 1000) // period_ms * period_ms
@@ -138,10 +174,7 @@ class SignalService:
             "created_at": int(time.time() * 1000),
         }
         self._push(sym, ts_ms, rhat)
-        self.r.set(keys.SIGNAL.format(sym=sym), json.dumps(sig))
-        self.r.xadd(keys.SIGNAL_STREAM, {"json": json.dumps(sig)}, maxlen=20000, approximate=True)
-        log.info("%s: rhat=%+.4f z=%+.2f → %+d", sym, rhat, z, sig["target"])
-        return sig
+        return self._publish(sig)
 
     def loop(self) -> None:
         client = httpx.Client(timeout=20)
@@ -155,7 +188,8 @@ class SignalService:
                     log.warning("%s: свечи не получены: %s", sym, e)
                 except Exception:
                     log.exception("%s: сигнал не посчитан", sym)
-            self.r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": PAIRS}), ex=600)
+            self.r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": PAIRS,
+                                                    "config": CONFIG["version"]}), ex=600)
             # Свеча закрывается в начале часа; Bybit отдаёт её через секунды.
             time.sleep(30)
 

@@ -15,7 +15,8 @@ if os.environ.get("SUNSCRYPT_TEST_LIVE") != "1":
 os.environ.setdefault("MASTER_KEY", base64.b64encode(os.urandom(32)).decode())
 os.environ.setdefault("DB_NULLPOOL", "1")
 os.environ["SUNS_EXECUTOR_MODULE"] = "tests.fake_executor"
-os.environ["SIGNAL_PAIRS"] = "BTCUSDT"
+_cfg = os.path.join(os.path.dirname(__file__), "pairs_btc.json")
+os.environ["SUNS_PAIRS_FILE"] = _cfg
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

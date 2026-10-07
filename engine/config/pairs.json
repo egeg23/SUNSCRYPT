@@ -1,0 +1,12 @@
+{
+  "version": "2026-10-06-demo",
+  "note": "Обкатка движка на демо: пары исследования, НЕ отобраны (этап 7 ещё идёт).",
+  "pairs": [
+    {"sym": "BTCUSDT", "strategy": "kronos_1h"},
+    {"sym": "ETHUSDT", "strategy": "kronos_1h"},
+    {"sym": "SOLUSDT", "strategy": "kronos_1h"},
+    {"sym": "XRPUSDT", "strategy": "kronos_1h"},
+    {"sym": "BNBUSDT", "strategy": "kronos_1h"},
+    {"sym": "ADAUSDT", "strategy": "kronos_1h"}
+  ]
+}

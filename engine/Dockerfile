@@ -13,6 +13,7 @@ RUN pip install --pre -r /tmp/requirements-engine.txt -r /tmp/requirements.txt
 COPY backend/app /app/backend/app
 COPY engine/sunscrypt_engine /app/engine/sunscrypt_engine
 COPY engine/vendor /app/engine/vendor
+COPY engine/config /app/engine/config
 
 ENV PYTHONPATH=/app/backend:/app/engine HF_HOME=/models/hf
 RUN useradd --system --uid 10001 --create-home app && mkdir -p /models && chown app /models

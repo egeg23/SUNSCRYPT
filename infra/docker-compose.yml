@@ -81,7 +81,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       SUNS_MODEL_DIR: /models/ft_small_s300
       KRONOS_THREADS: "2"
-      SIGNAL_PAIRS: ${SIGNAL_PAIRS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT}
+
     volumes:
       - ${MODELS_DIR:-../models}:/models
     depends_on:
@@ -100,7 +100,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       MASTER_KEY: ${MASTER_KEY:-}
       MASTER_KEY_PREVIOUS: ${MASTER_KEY_PREVIOUS:-}
-      SIGNAL_PAIRS: ${SIGNAL_PAIRS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT}
+
       BYBIT_DEMO_URL: ${BYBIT_DEMO_URL:-https://api-demo.bybit.com}
       BYBIT_REAL_URL: ${BYBIT_REAL_URL:-https://api.bybit.com}
     extra_hosts:

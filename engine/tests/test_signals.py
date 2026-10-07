@@ -71,3 +71,13 @@ def test_zscore_and_target():
     assert ss.target_of(ss.zscore(hist, 0.05)) == 1
     assert ss.target_of(ss.zscore(hist, -0.05)) == -1
     assert ss.target_of(ss.zscore(hist, 0.0)) == 0
+
+
+def test_momentum_daily_sign_of_24h_return(monkeypatch):
+    monkeypatch.setitem(ss.STRATEGY, "DOGEUSDT", "momentum_4h")
+    df = bars("2026-10-07 00:00", n=100)
+    svc = service(df)
+    sig = svc.step("DOGEUSDT", at("2026-10-07 03:00"))
+    expect = np.sign(df["close"].iloc[-1] / df["close"].iloc[-25] - 1)
+    assert sig["model"] == "momentum_4h" and sig["target"] == expect and sig["horizon"] == 24
+    assert svc.step("DOGEUSDT", at("2026-10-07 20:00")) is None  # раз в сутки

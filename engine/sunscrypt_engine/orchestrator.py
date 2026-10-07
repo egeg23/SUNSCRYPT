@@ -41,10 +41,11 @@ from app.cache import redis
 from app.db import SessionLocal, read_flags
 from app.models import EngineEvent, EquitySnapshot, ExchangeAccount, Funding, Trade
 from sunscrypt_engine import keys
+from sunscrypt_engine import pairs as pairs_cfg
 
 log = logging.getLogger("orchestrator")
 
-PAIRS = os.environ.get("SIGNAL_PAIRS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT")
+PAIRS = ",".join(pairs_cfg.symbols())
 LOOP_SECS = 10
 HB_STALE_SECS = 120
 STOP_GRACE_SECS = 180
