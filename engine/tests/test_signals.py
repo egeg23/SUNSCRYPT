@@ -87,6 +87,8 @@ def test_switches_to_new_champion_and_resets_z_history(tmp_path, monkeypatch):
     from sunscrypt_engine import registry
 
     monkeypatch.setattr(registry, "ROOT", str(tmp_path))
+    monkeypatch.setattr(ss, "PAIRS", ["BTCUSDT"])  # не зависеть от боевого конфига пар
+    monkeypatch.setattr(ss, "STRATEGY", {"BTCUSDT": "kronos_1h"})
     (tmp_path / "registry" / "v2").mkdir(parents=True)
     (tmp_path / "registry" / "v2" / "model.safetensors").write_bytes(b"x")
     made = []

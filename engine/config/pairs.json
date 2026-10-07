@@ -1,12 +1,11 @@
 {
-  "version": "2026-10-06-demo",
-  "note": "Обкатка движка на демо: пары исследования, НЕ отобраны (этап 7 ещё идёт).",
+  "version": "2026-10-07-v1",
+  "note": "Отбор этапа 7 по research/selection/RULES.md (правила записаны до расчёта): вал 2024-07…2025-06, тест 2025-07…2026-09, после комиссий 0,075% и фандинга. Отчёт — research/selection/REPORT.md. Kronos не прошёл ни на одной паре.",
   "pairs": [
-    {"sym": "BTCUSDT", "strategy": "kronos_1h"},
-    {"sym": "ETHUSDT", "strategy": "kronos_1h"},
-    {"sym": "SOLUSDT", "strategy": "kronos_1h"},
-    {"sym": "XRPUSDT", "strategy": "kronos_1h"},
-    {"sym": "BNBUSDT", "strategy": "kronos_1h"},
-    {"sym": "ADAUSDT", "strategy": "kronos_1h"}
+    {"sym": "ADAUSDT", "strategy": "momentum_4h"},
+    {"sym": "DOGEUSDT", "strategy": "momentum_4h"},
+    {"sym": "APTUSDT", "strategy": "momentum_4h"},
+    {"sym": "STXUSDT", "strategy": "momentum_4h"},
+    {"sym": "AVAXUSDT", "strategy": "momentum_4h"}
   ]
 }
