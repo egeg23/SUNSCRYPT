@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import { api } from "@/lib/api";
+import { TERMS_VERSION } from "@/lib/terms";
 import { tokenFromUrl, useSubmit } from "@/lib/useForm";
 
 // Доступ закрытый: аккаунт создаётся только по ссылке-приглашению от владельца.
@@ -25,6 +26,7 @@ export default function InvitePage() {
               invite: tokenFromUrl(),
               email: f.get("email"),
               password: f.get("password"),
+              terms: TERMS_VERSION,
             });
             router.push("/account");
           });
@@ -46,8 +48,11 @@ export default function InvitePage() {
             style={{ marginTop: 4 }}
           />
           <span>
-            Понимаю: торговля деривативами — высокий риск, прибыль не гарантирована. Сейчас
-            доступен только демо-счёт.
+            Прочитал(а) и принимаю{" "}
+            <Link href="/terms" target="_blank">
+              условия и риски
+            </Link>
+            : торговля деривативами — высокий риск, прибыль не гарантирована.
           </span>
         </label>
         {error ? <p className="err">{error}</p> : null}

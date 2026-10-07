@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from app import bybit
+from app.auth import TERMS_VERSION
 from tests import bybit_fake
 from tests.conftest import live
 from tests.helpers import user_with_2fa
@@ -84,7 +85,8 @@ def test_requires_2fa(client):
 
     tok = invite(client)
     client.post(
-        "/api/auth/register", json={"invite": tok, "email": fresh_email(), "password": PASSWORD}
+        "/api/auth/register",
+        json={"invite": tok, "email": fresh_email(), "password": PASSWORD, "terms": TERMS_VERSION},
     )
     r = add(client)
     assert r.status_code == 403 and "2FA" in r.text
@@ -158,7 +160,10 @@ def test_switch_to_real_needs_owner_flag_2fa_risk_and_limits(client, db):
     # Пользователь со своей 2FA (секрет нужен для свежих кодов).
     tok = invite(client)
     email = fresh_email()
-    client.post("/api/auth/register", json={"invite": tok, "email": email, "password": PASSWORD})
+    client.post(
+        "/api/auth/register",
+        json={"invite": tok, "email": email, "password": PASSWORD, "terms": TERMS_VERSION},
+    )
     secret = client.post("/api/auth/2fa/setup").json()["secret"]
     client.post("/api/auth/2fa/enable", json={"code": pyotp.TOTP(secret).now()})
 

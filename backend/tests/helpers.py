@@ -6,6 +6,8 @@ import uuid
 
 import pyotp
 
+from app.auth import TERMS_VERSION
+
 PASSWORD = "correct horse battery"
 OWNER = (os.environ.get("OWNER_EMAIL", ""), os.environ.get("OWNER_PASSWORD", ""))
 
@@ -53,7 +55,8 @@ def user_with_2fa(client) -> str:
     tok = invite(client)
     email = fresh_email()
     r = client.post(
-        "/api/auth/register", json={"invite": tok, "email": email, "password": PASSWORD}
+        "/api/auth/register",
+        json={"invite": tok, "email": email, "password": PASSWORD, "terms": TERMS_VERSION},
     )
     assert r.status_code == 201, r.text
     secret = client.post("/api/auth/2fa/setup").json()["secret"]

@@ -8,6 +8,7 @@ import { ApiError, api } from "@/lib/api";
 import { useSubmit } from "@/lib/useForm";
 
 type InviteRow = { note: string | null; created_at: string; status: string; used_by: string | null };
+type AlarmRow = { ts: string; kind: "alarm" | "ok"; message: string };
 type UserRow = { id: string; email: string; is_admin: boolean; totp_enabled: boolean; created_at: string };
 
 const STATUS: Record<string, string> = {
@@ -44,6 +45,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [link, setLink] = useState<{ url: string; hint: string } | null>(null);
   const [flags, setFlags] = useState<Record<string, boolean>>({});
+  const [alarms, setAlarms] = useState<AlarmRow[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +56,7 @@ export default function AdminPage() {
       setInvites(i);
       setUsers(u);
       setFlags(await api<Record<string, boolean>>("/admin/flags"));
+      setAlarms(await api<AlarmRow[]>("/admin/alarms"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/login");
       else if (e instanceof ApiError) setError(e.message);
@@ -64,6 +67,12 @@ export default function AdminPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- загрузка данных при открытии
     load();
   }, [load]);
+
+  const open = new Set<string>();
+  for (const a of [...alarms].reverse()) {
+    if (a.kind === "alarm") open.add(a.message);
+    else open.delete(a.message.replace(/^Исправилось: /, ""));
+  }
 
   return (
     <main className="wrap">
@@ -98,6 +107,45 @@ export default function AdminPage() {
             {flags.global_stop ? "Снять общую остановку" : "Остановить всё"}
           </button>
         </div>
+      </section>
+
+      <section>
+        <h2>Наблюдение</h2>
+        <p style={{ fontSize: 14, maxWidth: 640 }}>
+          {open.size ? (
+            <span className="err">⚠ Сейчас тревог: {open.size}</span>
+          ) : (
+            <span style={{ color: "var(--gain)" }}>✓ Сейчас тревог нет</span>
+          )}
+          <span className="muted">
+            {" "}
+            — раз в 5 минут сервер проверяет, что сигналы и исполнители живы, ключи Bybit в порядке и
+            журнал сделок сходится с биржей.
+          </span>
+        </p>
+        {alarms.length ? (
+          <div className="table-wrap">
+            <table className="log">
+              <thead>
+                <tr>
+                  <th>Когда</th>
+                  <th>Что</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alarms.slice(0, 20).map((a, n) => (
+                  <tr key={n}>
+                    <td className="mono">{new Date(a.ts).toLocaleString("ru-RU")}</td>
+                    <td style={{ color: a.kind === "alarm" ? "var(--loss)" : "var(--gain)" }}>
+                      {a.kind === "alarm" ? "⚠ " : "✓ "}
+                      {a.message}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </section>
 
       <section>

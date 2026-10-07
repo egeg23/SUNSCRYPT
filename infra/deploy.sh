@@ -127,6 +127,10 @@ export MODELS_DIR
 export GIT_COMMIT
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 COMPOSE=(docker compose -p sunscrypt --env-file "$ENV_FILE" -f infra/docker-compose.yml)
+# Перед выкаткой (в ней могут быть миграции) — копия базы, если она уже есть.
+if [ -n "$("${COMPOSE[@]}" ps -q postgres 2>/dev/null)" ]; then
+  bash infra/backup.sh || echo "⚠ копия базы перед выкаткой не снята" >&2
+fi
 say "Собираю и запускаю (порт $WEB_PORT)"
 "${COMPOSE[@]}" up -d --build --remove-orphans
 
@@ -199,6 +203,20 @@ for svc in signals orchestrator; do
   st="$("${COMPOSE[@]}" ps --format '{{.State}}' "$svc" 2>/dev/null || echo "нет")"
   say "Движок: $svc — $st"
 done
+
+# ── 6в. Расписание: наблюдение и копии базы ───────────────────────────────
+# Свой файл в /etc/cron.d — чужие расписания не трогаем. Вывод — в журнал
+# системы с меткой sunscrypt (journalctl -t sunscrypt).
+cat > /etc/cron.d/sunscrypt <<CRON
+# SUNSCRYPT — ставит infra/deploy.sh, правки руками затрутся.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/5 * * * * root cd $APP_DIR && docker compose -p sunscrypt --env-file $ENV_FILE -f infra/docker-compose.yml exec -T backend python -m app.watch 2>&1 | logger -t sunscrypt
+41 3 * * * root bash $APP_DIR/infra/backup.sh 2>&1 | logger -t sunscrypt
+CRON
+chmod 644 /etc/cron.d/sunscrypt
+"${COMPOSE[@]}" exec -T backend python -m app.watch | sed 's/^/▸ /' || true
+say "Копий базы: $(find "$APP_DIR/backups" -name 'sunscrypt-*.dump' 2>/dev/null | wc -l)"
 
 # ── 7. Мастер-ключ и демо-ключ Bybit владельца ──────────────────────────────
 # Перешифровка секретов текущим MASTER_KEY (нужна только после его смены).

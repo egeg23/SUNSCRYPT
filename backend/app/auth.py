@@ -53,10 +53,15 @@ class Credentials(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+# Версия «Условий и рисков» (web/src/app/terms). Меняется вместе с текстом.
+TERMS_VERSION = "2026-10-07"
+
+
 class Register(BaseModel):
     invite: str = Field(min_length=10, max_length=128)
     email: EmailStr
     password: str = Field(min_length=MIN_PASSWORD, max_length=256)
+    terms: str = Field(max_length=32)
 
 
 class TokenIn(BaseModel):
@@ -237,13 +242,21 @@ CurrentUser = Annotated[Current, Depends(require_login)]
 async def register(body: Register, request: Request, response: Response, db: Db) -> dict:
     """Регистрация по приглашению; сразу входит в аккаунт."""
     await enforce(f"register:ip:{_ip(request)}", 10, 3600)
+    if body.terms != TERMS_VERSION:
+        raise HTTPException(400, "Условия обновились — обновите страницу и прочитайте их снова.")
     inv = await db.get(Invite, crypto.token_hash(body.invite))
     if inv is None or inv.used_at or inv.expires_at < _now():
         raise HTTPException(400, "Приглашение недействительно или устарело. Попросите новое.")
     email = _norm(body.email)
     if await db.scalar(select(User.id).where(User.email == email)):
         raise HTTPException(409, "Такая почта уже зарегистрирована — войдите")
-    user = User(email=email, password_hash=_ph.hash(body.password), email_verified_at=_now())
+    user = User(
+        email=email,
+        password_hash=_ph.hash(body.password),
+        email_verified_at=_now(),
+        terms_version=body.terms,
+        terms_accepted_at=_now(),
+    )
     db.add(user)
     await db.flush()
     inv.used_at, inv.used_by = _now(), user.id

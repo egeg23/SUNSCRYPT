@@ -51,6 +51,9 @@ class User(Base):
     # Последний принятый шаг TOTP: один код нельзя использовать дважды.
     totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Принятая версия «Условий и рисков» (/terms) и когда.
+    terms_version: Mapped[str | None] = mapped_column(String(32))
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_col()
 
 

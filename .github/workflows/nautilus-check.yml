@@ -1,0 +1,27 @@
+name: NautilusTrader — новые версии
+
+# Раз в сутки: вышла ли новая версия NautilusTrader и проходит ли она наши
+# проверки (сборка живого узла, бэктест на фикстурах, сверка с эталоном).
+# Обновлять закреплённую версию (engine/requirements-nautilus.txt) — только
+# после PASS здесь. FAIL — задача красная, GitHub пишет владельцу.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Проверка новой версии (выпуски)
+        working-directory: engine
+        shell: bash
+        run: python tools/check_nautilus.py --test | tee -a "$GITHUB_STEP_SUMMARY"

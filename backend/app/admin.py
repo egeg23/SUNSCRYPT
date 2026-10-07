@@ -98,6 +98,18 @@ async def flags(cur: Admin, db: Db) -> dict[str, bool]:
     return await read_flags(db)
 
 
+@router.get("/alarms")
+async def alarms(cur: Admin, db: Db) -> list[dict]:
+    """Тревоги наблюдения (app/watch.py) и их снятие — последние 50."""
+    rows = await db.scalars(
+        select(EngineEvent)
+        .where(EngineEvent.kind.in_(("alarm", "ok")))
+        .order_by(EngineEvent.ts.desc())
+        .limit(50)
+    )
+    return [{"ts": e.ts.isoformat(), "kind": e.kind, "message": e.message} for e in rows]
+
+
 @router.post("/global-stop")
 async def global_stop(body: GlobalStopIn, cur: Admin, db: Db) -> dict[str, bool]:
     """Общая аварийная остановка: все кабинеты закрывают позиции и встают."""

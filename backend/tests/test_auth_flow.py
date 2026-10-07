@@ -12,6 +12,7 @@ import pyotp
 import pytest
 from sqlalchemy import create_engine, text
 
+from app.auth import TERMS_VERSION
 from tests.conftest import live
 from tests.helpers import OWNER, PASSWORD, fresh_email, invite, owner_login, token_of
 
@@ -38,7 +39,12 @@ def test_owner_is_bootstrapped_admin(client):
 def test_register_requires_invite(client):
     r = client.post(
         "/api/auth/register",
-        json={"invite": "x" * 20, "email": fresh_email(), "password": PASSWORD},
+        json={
+            "invite": "x" * 20,
+            "email": fresh_email(),
+            "password": PASSWORD,
+            "terms": TERMS_VERSION,
+        },
     )
     assert r.status_code == 400
 
@@ -47,9 +53,17 @@ def test_full_cycle(client, db):
     tok = invite(client)
     email = fresh_email()
 
+    # Без согласия с текущими условиями — нет; приглашение не тратится.
+    r = client.post(
+        "/api/auth/register",
+        json={"invite": tok, "email": email, "password": PASSWORD, "terms": "2000-01-01"},
+    )
+    assert r.status_code == 400 and "Условия" in r.json()["detail"]
+
     # Регистрация по приглашению — сразу вход; приглашение одноразовое.
     r = client.post(
-        "/api/auth/register", json={"invite": tok, "email": email.upper(), "password": PASSWORD}
+        "/api/auth/register",
+        json={"invite": tok, "email": email.upper(), "password": PASSWORD, "terms": TERMS_VERSION},
     )
     assert r.status_code == 201, r.text
     cookie = r.headers["set-cookie"].lower()
@@ -57,7 +71,8 @@ def test_full_cycle(client, db):
     me = client.get("/api/auth/me").json()
     assert me["email"] == email and me["totp_enabled"] is False and me["is_admin"] is False
     r = client.post(
-        "/api/auth/register", json={"invite": tok, "email": fresh_email(), "password": PASSWORD}
+        "/api/auth/register",
+        json={"invite": tok, "email": fresh_email(), "password": PASSWORD, "terms": TERMS_VERSION},
     )
     assert r.status_code == 400
 
@@ -110,7 +125,13 @@ def test_full_cycle(client, db):
 
 def test_short_password_rejected(client):
     r = client.post(
-        "/api/auth/register", json={"invite": "x" * 20, "email": fresh_email(), "password": "short"}
+        "/api/auth/register",
+        json={
+            "invite": "x" * 20,
+            "email": fresh_email(),
+            "password": "short",
+            "terms": TERMS_VERSION,
+        },
     )
     assert r.status_code == 422
 
