@@ -83,8 +83,17 @@ def test_link_commands_and_notifications(client, monkeypatch):
     assert fake.sent[-1][0] == chat and "Мой демо" in fake.sent[-1][1]
 
     # Сделка — сразу в чат владельца кабинета.
-    fill = {"type": "fill", "sym": "ADAUSDT", "side": "sell", "qty": "778", "price": "0.6312",
-            "fee": "0.098", "fee_ccy": "USDT", "liquidity": "MAKER", "mode": "demo"}
+    fill = {
+        "type": "fill",
+        "sym": "ADAUSDT",
+        "side": "sell",
+        "qty": "778",
+        "price": "0.6312",
+        "fee": "0.098",
+        "fee_ccy": "USDT",
+        "liquidity": "MAKER",
+        "mode": "demo",
+    }
     run(lambda: tgbot.notify_fill(fake.tg, f"live:{acc['id']}", fill), monkeypatch)
     assert fake.sent[-1] == (chat, tgbot.fmt_fill(fill, "Мой демо"))
     assert "Продажа 778 ADAUSDT" in fake.sent[-1][1]
