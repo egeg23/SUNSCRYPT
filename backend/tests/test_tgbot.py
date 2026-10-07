@@ -95,8 +95,28 @@ def test_link_commands_and_notifications(client, monkeypatch):
         "mode": "demo",
     }
     run(lambda: tgbot.notify_fill(fake.tg, f"live:{acc['id']}", fill), monkeypatch)
-    assert fake.sent[-1] == (chat, tgbot.fmt_fill(fill, "Мой демо"))
-    assert "Продажа 778 ADAUSDT" in fake.sent[-1][1]
+    assert fake.sent[-1][0] == chat
+    assert "🔽 Продажа 778 ADAUSDT по 0.6312" in fake.sent[-1][1]
+
+    # Состояние: каждая позиция своей строкой, стрелка — направление.
+    r = __import__("redis").Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    r.set(
+        f"hb:acct:{acc['id']}",
+        json.dumps(
+            {
+                "ts": 1,
+                "positions": {"ADAUSDT": -6263.0, "STXUSDT": 4015.6},
+                "upnl": {"ADAUSDT": 12.5, "STXUSDT": -8.04},
+            }
+        ),
+    )
+    r.set(f"daytotal:{acc['id']}:{tgbot._today()}", "-11.89")
+    run(lambda: tgbot.handle_update(fake.tg, msg(chat, "/status")), monkeypatch)
+    status = fake.sent[-1][1].splitlines()
+    assert status[0].startswith("📊 Состояние на ")
+    assert "🔽 ADA шорт 6 263 · 🟢 +12.50 USD" in status
+    assert "🔼 STX лонг 4 015.6 · 🔴 −8.04 USD" in status
+    assert "📉 С открытыми позициями: −11.89 USD" in status
 
     # Тревога по кабинету — владельцу кабинета, один раз.
     run(lambda: tgbot.send_alarms(fake.tg), monkeypatch)  # первый запуск: старое не шлём
@@ -152,18 +172,25 @@ def test_fill_message_shows_result_and_day_total():
         "net": 15.46,
         "day_net": 42.3,
     }
-    text = tgbot.fmt_fill(close, "Мой демо", day_open=-3.5)
+    text = tgbot.fmt_fill(close, "Мой демо", day_open=-3.5, equity=4012.351)
     assert text.splitlines() == [
-        "🟢 Прибыль +15.46 USD · Мой демо (демо)",
-        "Продажа 778 ADAUSDT по 0.6500 — закрыт лонг (вход 0.63)",
-        "Результат +15.56 USD, комиссия 0.10 → +15.46 USD",
-        "Итог дня по сделкам: +42.30 USD (7 сделок)",
-        "С учётом открытых позиций: −3.50 USD",
+        "🟢 Прибыль +15.46 USD",
+        "🤖 Мой демо · демо",
+        "",
+        "🔽 Продажа 778 ADAUSDT по 0.6500",
+        "🔒 Закрыт лонг (вход 0.63)",
+        "💵 Результат +15.56 USD",
+        "🧾 Комиссия −0.10 USD",
+        "",
+        "📈 Итог дня по сделкам: +42.30 USD (7 сделок)",
+        "📉 С открытыми позициями: −3.50 USD",
+        "💰 Баланс: 4 012.35 USDT",
     ]
     loss = {**close, "pos_after": -100.0, "pnl": -5.0, "net": -5.1, "day_fills": 1, "day_net": -5.1}
     text = tgbot.fmt_fill(loss, "Мой демо")
     assert text.startswith("🔴 Убыток −5.10 USD")
-    assert "закрыт лонг, открыт шорт" in text and "(1 сделка)" in text
+    assert "Закрыт лонг, открыт шорт" in text and "(1 сделка)" in text
+    assert "Баланс" not in text  # баланс неизвестен — строки нет
     opened = {
         **base,
         "side": "buy",
@@ -179,9 +206,13 @@ def test_fill_message_shows_result_and_day_total():
         "day_fills": 2,
     }
     text = tgbot.fmt_fill(opened, "Мой демо")
-    assert text.splitlines()[:3] == [
-        "⚪ Открыт лонг · Мой демо (демо)",
-        "Покупка 1000 ADAUSDT по 0.6500 (≈ 650 USD)",
-        "Комиссия −0.13 USD; прибыль или убыток — при закрытии",
+    assert text.splitlines()[:7] == [
+        "⚪ Открыт лонг",
+        "🤖 Мой демо · демо",
+        "",
+        "🔼 Покупка 1000 ADAUSDT по 0.6500",
+        "💵 Объём ≈ 650 USD",
+        "🧾 Комиссия −0.13 USD",
+        "⏳ Прибыль или убыток — при закрытии",
     ]
-    assert "(2 сделки)" in text
+    assert "📉 Итог дня по сделкам: −0.13 USD (2 сделки)" in text

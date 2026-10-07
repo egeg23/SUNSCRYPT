@@ -103,7 +103,23 @@ class TG:
 
 # ── тексты ──────────────────────────────────────────────────────────────────
 def _usd(v: float) -> str:
-    return f"{v:+.2f} USD".replace("-", "−")
+    return f"{v:+,.2f} USD".replace(",", " ").replace("-", "−")
+
+
+def _trend(v: float) -> str:
+    return "📈" if v >= 0 else "📉"
+
+
+def _money(v: float) -> str:
+    return f"{v:,.2f}".replace(",", " ")
+
+
+def _qty(q: float) -> str:
+    return f"{abs(q):,.4f}".rstrip("0").rstrip(".").replace(",", " ")
+
+
+def _balance(equity: float | None) -> str | None:
+    return f"💰 Баланс: {_money(equity)} USDT" if equity is not None else None
 
 
 def _trades(n: int) -> str:
@@ -128,31 +144,45 @@ def _what(f: dict) -> str:
     return f"закрыт {side(before)}, открыт {side(after)}"
 
 
-def fmt_fill(f: dict, name: str, day_open: float | None = None) -> str:
-    side = "Покупка" if f.get("side") == "buy" else "Продажа"
+def fmt_fill(f: dict, name: str, day_open: float | None = None, equity: float | None = None) -> str:
+    buy = f.get("side") == "buy"
     fee = float(f.get("fee") or 0)
     mode = MODE_RU.get(f.get("mode", "demo"), f.get("mode"))
-    deal = f"{side} {f.get('qty')} {f.get('sym')} по {f.get('price')}"
+    deal = (
+        f"{'🔼 Покупка' if buy else '🔽 Продажа'} {f.get('qty')} {f.get('sym')} по {f.get('price')}"
+    )
+    who = f"🤖 {name} · {mode}"
     if "net" not in f:  # исполнитель старой версии — без результата
-        return f"Сделка · {name} ({mode})\n{deal}, комиссия {fee:.4f} {f.get('fee_ccy') or 'USDT'}"
+        ccy = f.get("fee_ccy") or "USDT"
+        return f"🔔 Сделка\n{who}\n\n{deal}\n🧾 Комиссия {fee:.4f} {ccy}"
     net = float(f["net"])
     if float(f["closed_qty"]):
         icon, head = ("🟢", "Прибыль") if net >= 0 else ("🔴", "Убыток")
         lines = [
-            f"{icon} {head} {_usd(net)} · {name} ({mode})",
-            f"{deal} — {_what(f)} (вход {float(f['entry_px']):g})",
-            f"Результат {_usd(float(f['pnl']))}, комиссия {fee:.2f} → {_usd(net)}",
+            f"{icon} {head} {_usd(net)}",
+            who,
+            "",
+            deal,
+            f"🔒 {_what(f).capitalize()} (вход {float(f['entry_px']):g})",
+            f"💵 Результат {_usd(float(f['pnl']))}",
+            f"🧾 Комиссия {_usd(-fee)}",
         ]
     else:
         lines = [
-            f"⚪ {_what(f).capitalize()} · {name} ({mode})",
-            f"{deal} (≈ {float(f['qty']) * float(f['price']):,.0f} USD)".replace(",", " "),
-            f"Комиссия {_usd(-fee)}; прибыль или убыток — при закрытии",
+            f"⚪ {_what(f).capitalize()}",
+            who,
+            "",
+            deal,
+            f"💵 Объём ≈ {float(f['qty']) * float(f['price']):,.0f} USD".replace(",", " "),
+            f"🧾 Комиссия {_usd(-fee)}",
+            "⏳ Прибыль или убыток — при закрытии",
         ]
     day_net, day_n = float(f["day_net"]), int(f["day_fills"])
-    lines.append(f"Итог дня по сделкам: {_usd(day_net)} ({_trades(day_n)})")
+    lines += ["", f"{_trend(day_net)} Итог дня по сделкам: {_usd(day_net)} ({_trades(day_n)})"]
     if day_open is not None:
-        lines.append(f"С учётом открытых позиций: {_usd(day_open)}")
+        lines.append(f"{_trend(day_open)} С открытыми позициями: {_usd(day_open)}")
+    if (bal := _balance(equity)) is not None:
+        lines.append(bal)
     return "\n".join(lines)
 
 
@@ -167,29 +197,45 @@ async def _day_total(aid, day: str) -> float | None:
 
 
 async def account_lines(a: ExchangeAccount, day: str) -> list[str]:
+    """Блок кабинета для /status и отчётов: каждая величина — своей строкой."""
     hb = await _hb(a.id)
-    state = "торговля вкл" if a.trading_enabled else "торговля выкл"
+    lines = [f"🤖 {a.name} · {MODE_RU.get(a.mode, a.mode)}"]
     if a.stopped:
-        state = "аварийная остановка"
+        lines.append("🛑 Аварийная остановка")
+    elif a.trading_enabled:
+        lines.append("✅ Торговля включена")
+    else:
+        lines.append("⏸ Торговля выключена")
     dd = await cache.redis.get(f"ddhalt:{a.id}:{a.mode}")
-    lines = [f"• {a.name} ({MODE_RU.get(a.mode, a.mode)}): {state}"]
     if dd:
-        lines.append(f"  стоит: {dd.decode()}")
+        lines.append(f"⛔ Стоит: {dd.decode()}")
     elif hb and hb.get("halted"):
-        lines.append(f"  стоит: {hb['halted']}")
+        lines.append(f"⛔ Стоит: {hb['halted']}")
+    if (bal := _balance(a.equity_usd)) is not None:
+        lines.append(bal)
     if hb:
-        pos = hb.get("positions") or {}
-        lines.append(
-            "  позиции: "
-            + (", ".join(f"{s} {'+' if q > 0 else ''}{q}" for s, q in pos.items()) or "нет")
-        )
+        pos, upnl = hb.get("positions") or {}, hb.get("upnl") or {}
+        if pos:
+            lines += ["", "📂 Позиции:"]
+            for sym, q in pos.items():
+                arrow, side = ("🔼", "лонг") if q > 0 else ("🔽", "шорт")
+                line = f"{arrow} {sym.removesuffix('USDT')} {side} {_qty(q)}"
+                if sym in upnl:
+                    u = float(upnl[sym])
+                    line += f" · {'🟢' if u >= 0 else '🔴'} {_usd(u)}"
+                lines.append(line)
+        else:
+            lines += ["", "📂 Позиций нет"]
+    day_lines = []
     net = await cache.redis.hgetall(f"daynet:{a.id}:{a.mode}:{day}")
     if net:
         n, v = int(net.get(b"n", 0)), float(net.get(b"net", 0))
-        lines.append(f"  итог по сделкам: {_usd(v)} ({_trades(n)}, после комиссий)")
+        day_lines.append(f"{_trend(v)} Итог по сделкам: {_usd(v)} ({_trades(n)})")
     total = await _day_total(a.id, day)
     if total is not None:
-        lines.append(f"  с учётом открытых позиций: {_usd(total)}")
+        day_lines.append(f"{_trend(total)} С открытыми позициями: {_usd(total)}")
+    if day_lines:
+        lines += ["", "📅 За сутки (UTC), после комиссий:", *day_lines]
     return lines
 
 
@@ -245,10 +291,11 @@ async def handle_update(tg: TG, upd: dict) -> None:
             if not accounts:
                 await tg.send(chat, "Кабинетов Bybit нет — подключите на сайте, раздел «Bybit».")
                 return
-            head = "Состояние" if cmd == "/status" else "Отчёт за сегодня (UTC)"
-            lines = [head + ":"]
+            now = datetime.now(UTC).strftime("%H:%M")
+            head = f"📊 Состояние на {now} UTC" if cmd == "/status" else "📊 Отчёт за сегодня (UTC)"
+            lines = [head]
             for a in accounts:
-                lines += await account_lines(a, _today())
+                lines += ["", "━━━━━━━━━━━━", *await account_lines(a, _today())]
             await tg.send(chat, "\n".join(lines))
         elif cmd == "/stop":
             accounts = await _accounts(db, user.id)
@@ -288,10 +335,12 @@ async def notify_fill(tg: TG, channel: str, data: dict) -> None:
     aid = channel.removeprefix("live:")
     async with SessionLocal() as db:
         chat, name = await _chat_of_account(db, aid)
+        acc = await db.get(ExchangeAccount, uuid.UUID(aid)) if chat else None
     if chat:
         day = datetime.fromtimestamp(int(data.get("ts") or 0) / 1000 or time.time(), UTC)
         day_open = await _day_total(aid, day.strftime("%Y%m%d"))
-        await tg.send(chat, fmt_fill(data, name, day_open))
+        equity = acc.equity_usd if acc is not None else None
+        await tg.send(chat, fmt_fill(data, name, day_open, equity))
         if data.get("ts"):  # от исполнения на бирже до отправки в Telegram (бриф: < 5 с)
             log.info(
                 "сделка %s → Telegram за %.1f с",
@@ -361,10 +410,10 @@ async def daily_report(tg: TG, day: str) -> int:
             if not accounts:
                 continue
             d = datetime.strptime(day, "%Y%m%d").strftime("%d.%m.%Y")
-            lines = [f"Отчёт за {d} (UTC):"]
+            lines = [f"📊 Отчёт за {d} (UTC)"]
             for a in accounts:
-                lines += await account_lines(a, day)
-            lines.append("Прошлые результаты не обещают будущих.")
+                lines += ["", "━━━━━━━━━━━━", *await account_lines(a, day)]
+            lines += ["", "⚠️ Прошлые результаты не обещают будущих."]
             await tg.send(u.telegram_chat_id, "\n".join(lines))
             n += 1
     return n

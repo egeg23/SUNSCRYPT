@@ -313,6 +313,12 @@ class FollowerStrategy(Strategy):
         hb = {
             "ts": int(self._now() * 1000),
             "positions": {k: v for k, v in pos.items() if v},
+            # Нереализованный результат по открытым позициям — для /status в Telegram.
+            "upnl": {
+                sym_of(i): round(float(self.portfolio.unrealized_pnl(i) or 0), 2)
+                for i in self.cfg.instrument_ids
+                if pos[sym_of(i)]
+            },
             "pnl": round(self._pnl(), 4),
             "day_pnl": round(self.carry + self._pnl() - self.day_start_pnl, 4),
             "halted": self.halted,
