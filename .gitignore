@@ -13,3 +13,4 @@ ci.env
 models/
 engine/var/
 engine/.venv/
+dump.rdb
