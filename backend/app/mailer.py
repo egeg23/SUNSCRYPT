@@ -41,6 +41,7 @@ async def send(session: AsyncSession, to: str, subject: str, body: str) -> None:
     try:
         await asyncio.to_thread(_send_smtp, to, subject, body)
         mail.sent_at = datetime.now(UTC)
+        mail.body = ""  # ссылки из писем (сброс пароля) в базе и копиях не нужны
     except Exception as e:
         mail.error = type(e).__name__
         log.warning("письмо #%s не отправлено: %s", mail.id, type(e).__name__)

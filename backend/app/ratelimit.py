@@ -9,9 +9,13 @@ from app.cache import redis
 log = logging.getLogger(__name__)
 
 
+# Без Redis эти лимиты закрыты (иначе перебор пароля и кодов 2FA без
+# ограничений); остальные — открыты: работа важнее, сбой видно в /api/health.
+FAIL_CLOSED = ("login:", "2fa:")
+
+
 async def hit(key: str, limit: int, window_s: int) -> bool:
-    """True — запрос в пределах лимита. Если Redis недоступен, пропускаем:
-    вход важнее, а сбой Redis видно в /api/health."""
+    """True — запрос в пределах лимита."""
     try:
         k = f"rl:{key}"
         n = await redis.incr(k)
@@ -20,7 +24,7 @@ async def hit(key: str, limit: int, window_s: int) -> bool:
         return n <= limit
     except Exception:
         log.warning("ratelimit: Redis недоступен, лимит не проверен")
-        return True
+        return not key.startswith(FAIL_CLOSED)
 
 
 async def enforce(key: str, limit: int, window_s: int) -> None:

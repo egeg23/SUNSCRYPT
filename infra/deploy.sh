@@ -47,6 +47,13 @@ env_set() {
   printf '%s=%s\n' "$1" "$2" >> "$tmp"
   chmod 600 "$tmp"; mv "$tmp" "$ENV_FILE"
 }
+# Выкатка кладёт их в .incoming (0600) отдельным коротким шагом: так они не
+# висят в списке процессов сервера всю выкатку. Прочитали — удалили.
+if [ -f "$APP_DIR/.incoming" ]; then
+  # shellcheck disable=SC1091
+  . "$APP_DIR/.incoming"
+  rm -f "$APP_DIR/.incoming"
+fi
 for name in TELEGRAM_TOKEN BYBIT_DEMO_API_KEY BYBIT_DEMO_API_SECRET \
             SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM \
             OWNER_EMAIL OWNER_PASSWORD WEIGHTS_IDS; do

@@ -33,7 +33,14 @@ from app.ratelimit import enforce
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-COOKIE = "sunscrypt_session"
+
+def cookie_name() -> str:
+    """С префиксом __Host-: браузер не даст соседнему сайту (*.sslip.io —
+    один «сайт» для браузера) подложить свою cookie. Префикс требует Secure,
+    поэтому без HTTPS (локально, в CI) — обычное имя."""
+    return "__Host-sunscrypt_session" if get_settings().cookie_secure else "sunscrypt_session"
+
+
 TOTP_PURPOSE = "user.totp"
 VERIFY_TTL = timedelta(hours=48)
 RESET_TTL = timedelta(hours=1)
@@ -188,7 +195,7 @@ async def _start_session(
         )
     )
     response.set_cookie(
-        COOKIE,
+        cookie_name(),
         token,
         max_age=days * 86400,
         httponly=True,
@@ -207,7 +214,7 @@ class Current:
 
 async def current(request: Request, db: Db) -> Current:
     """Вошедший пользователь (2FA может быть ещё не пройдена)."""
-    token = request.cookies.get(COOKIE)
+    token = request.cookies.get(cookie_name())
     if not token:
         raise HTTPException(401, "Нужно войти")
     sess = await db.get(Session, crypto.token_hash(token))
@@ -259,7 +266,15 @@ async def register(body: Register, request: Request, response: Response, db: Db)
     )
     db.add(user)
     await db.flush()
-    inv.used_at, inv.used_by = _now(), user.id
+    # Условное обновление: два одновременных входа по одной ссылке не пройдут.
+    taken = await db.execute(
+        update(Invite)
+        .where(Invite.token_hash == inv.token_hash, Invite.used_at.is_(None))
+        .values(used_at=_now(), used_by=user.id)
+    )
+    if taken.rowcount != 1:
+        await db.rollback()
+        raise HTTPException(400, "Приглашение недействительно или устарело. Попросите новое.")
     await _start_session(db, request, response, user, mfa=True)
     await _log(db, request, email=email, event="register", success=True, user_id=user.id)
     await db.commit()
@@ -331,8 +346,12 @@ async def resend_verify(body: EmailIn, request: Request, db: Db) -> dict:
 @router.post("/login")
 async def login(body: Credentials, request: Request, response: Response, db: Db) -> dict:
     email = _norm(body.email)
+    # Лимит на почту — вместе с IP: иначе любой мог бы восемью неверными
+    # попытками закрыть владельцу вход. Общий потолок на почту — на перебор
+    # с многих адресов.
     await enforce(f"login:ip:{_ip(request)}", 20, 900)
-    await enforce(f"login:email:{email}", 8, 900)
+    await enforce(f"login:email:{email}:{_ip(request)}", 8, 900)
+    await enforce(f"login:email:{email}", 200, 3600)
     user = await db.scalar(select(User).where(User.email == email))
     try:
         _ph.verify(user.password_hash if user else _DUMMY_HASH, body.password)
@@ -398,11 +417,11 @@ async def verify_2fa(body: CodeIn, cur: CurrentAny, request: Request, db: Db) ->
 
 @router.post("/logout")
 async def logout(request: Request, response: Response, db: Db) -> dict:
-    token = request.cookies.get(COOKIE)
+    token = request.cookies.get(cookie_name())
     if token:
         await db.execute(delete(Session).where(Session.token_hash == crypto.token_hash(token)))
         await db.commit()
-    response.delete_cookie(COOKIE, path="/")
+    response.delete_cookie(cookie_name(), path="/", secure=get_settings().cookie_secure)
     return {"ok": True}
 
 

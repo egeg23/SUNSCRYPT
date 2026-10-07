@@ -30,8 +30,10 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="SUNSCRYPT API",
-    docs_url="/api/docs",
-    openapi_url="/api/openapi.json",
+    # Карта API наружу не нужна: доступ закрытый.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
 )
 app.include_router(auth.router)
@@ -76,7 +78,7 @@ async def health(response: Response) -> dict:
 
 
 @app.get("/api/engine/signals")
-async def engine_signals() -> dict:
+async def engine_signals(cur: Annotated[auth.Current, Depends(auth.require_login)]) -> dict:
     """Последние решения сервиса сигналов по парам — общие для всех."""
     import json as _json
 

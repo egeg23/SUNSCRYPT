@@ -196,6 +196,18 @@ def test_switch_to_real_needs_owner_flag_2fa_risk_and_limits(client, db):
         r = client.post(url, json={**full, "code": pyotp.TOTP(secret).at(time.time() + 30)})
         assert r.status_code == 200, r.text
         assert r.json()["mode"] == "real" and r.json()["capital_usd"] == 500
+        # На реальном: поднять лимит или плечо, заменить ключ — только через
+        # переключатель с кодом; снизить — можно.
+        s_url = f"/api/accounts/{acc['id']}/settings"
+        assert client.patch(s_url, json={"capital_usd": 1000}).status_code == 400
+        assert client.patch(s_url, json={"daily_loss_pct": 10}).status_code == 400
+        assert client.patch(s_url, json={"leverage": 2}).status_code == 400
+        assert client.patch(s_url, json={"capital_usd": 400}).json()["capital_usd"] == 400
+        r = client.post(
+            f"/api/accounts/{acc['id']}/keys",
+            json={"mode": "real", "api_key": "REALk3y7654321", "api_secret": GOOD_SECRET},
+        )
+        assert r.status_code == 400 and "заменить ключ" in r.text
         # Обратно на демо — без кода.
         assert client.post(url, json={"mode": "demo"}).json()["mode"] == "demo"
     finally:
@@ -222,3 +234,10 @@ def test_real_trading_switch_is_owner_only(client):
         client.post("/api/admin/real-trading", json={"enabled": True, "code": "123456"}).status_code
         == 403
     )
+
+
+def test_new_account_with_real_key_starts_in_demo(client):
+    user_with_2fa(client)
+    r = add(client, key="REALk3y1112223", mode="real")
+    assert r.status_code == 201, r.text
+    assert r.json()["mode"] == "demo" and r.json()["keys"]["real"]["key_tail"] == "2223"

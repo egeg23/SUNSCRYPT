@@ -120,16 +120,20 @@ class Orchestrator:
         pr.started, pr.stopping_since = time.time(), None
         pr.fingerprint = self._fingerprint(a, capital)
         pr.mode = a.mode
-        pr.log_task = asyncio.create_task(self._pipe_log(aid, pr.p))
+        pr.log_task = asyncio.create_task(self._pipe_log(aid, pr.p, (key, secret)))
         await self.event(a.id, "start", f"Исполнитель запущен: {a.mode}, капитал {capital:.0f} USD, "
                                          f"плечо {a.leverage}×, пары {PAIRS}")
 
-    async def _pipe_log(self, aid: str, p: asyncio.subprocess.Process) -> None:
-        """Лог исполнителя — в лог диспетчера с меткой кабинета (без ключей:
-        адаптер Nautilus их маскирует)."""
+    async def _pipe_log(self, aid: str, p: asyncio.subprocess.Process, hide: tuple[str, ...] = ()) -> None:
+        """Лог исполнителя — в лог диспетчера с меткой кабинета. Ключ и секрет
+        вырезаются, даже если библиотека вдруг их напечатает."""
         assert p.stdout
         async for line in p.stdout:
-            sys.stdout.write(f"[{aid[:8]}] {line.decode(errors='replace')}")
+            text = line.decode(errors="replace")
+            for h in hide:
+                if h:
+                    text = text.replace(h, "••••")
+            sys.stdout.write(f"[{aid[:8]}] {text}")
 
     async def kill(self, aid: str, reason: str) -> None:
         pr = self.procs.get(aid)

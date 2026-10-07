@@ -212,7 +212,9 @@ async def add_account(body: AccountIn, cur: Owner2FA, request: Request, db: Db) 
     if (count or 0) >= MAX_ACCOUNTS:
         raise _problem(f"Не больше {MAX_ACCOUNTS} кабинетов.")
     chk, eq = await _checked_key(body)
-    a = ExchangeAccount(user_id=cur.user.id, name=body.name.strip(), mode=body.mode)
+    # Кабинет всегда начинается в демо: в реальный — только переключателем
+    # (свежий код 2FA, подтверждение рисков, лимиты).
+    a = ExchangeAccount(user_id=cur.user.id, name=body.name.strip(), mode="demo")
     db.add(a)
     await db.flush()
     k = AccountKey(account_id=a.id, mode=body.mode)
@@ -223,11 +225,16 @@ async def add_account(body: AccountIn, cur: Owner2FA, request: Request, db: Db) 
     return _view(a, {body.mode: k})
 
 
+REAL_SWITCH = "переключите кабинет на демо и снова на реальный — с кодом 2FA"
+
+
 @router.post("/{account_id}/keys")
 async def put_key(account_id: uuid.UUID, body: KeyIn, cur: Owner2FA, db: Db) -> dict:
     """Подключить или заменить ключ демо или реального счёта."""
     await enforce(f"accounts:add:{cur.user.id}", 10, 3600)
     a = await _own(db, cur, account_id)
+    if body.mode == "real" and a.mode == "real":
+        raise _problem(f"Чтобы заменить ключ реального счёта, {REAL_SWITCH}.")
     chk, eq = await _checked_key(body)
     keys = await keys_map(db, a.id)
     k = keys.get(body.mode) or AccountKey(account_id=a.id, mode=body.mode)
@@ -299,6 +306,13 @@ async def settings(account_id: uuid.UUID, body: SettingsIn, cur: Owner2FA, db: D
             raise _problem("Сначала исправьте ключ: кабинет с ошибкой торговать не может.")
         if a.mode == "real" and not await _real_allowed(db):
             raise _problem(REAL_OFF)
+    if a.mode == "real":
+        for field in ("leverage", "capital_usd", "daily_loss_pct"):
+            v, cur_v = getattr(body, field), getattr(a, field)
+            if v is not None and (cur_v is None or v > cur_v):
+                raise _problem(
+                    f"Поднять плечо или лимиты реального счёта: {REAL_SWITCH}. Снизить можно здесь."
+                )
     for field in ("trading_enabled", "leverage", "capital_usd", "daily_loss_pct"):
         v = getattr(body, field)
         if v is not None:
