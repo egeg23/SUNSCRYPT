@@ -127,6 +127,16 @@ class SignalService:
             return self.step_momentum(sym, now)
         return self.step_kronos(sym, now)
 
+    def _done(self, sym: str, due_ms: int, momentum: bool) -> bool:
+        """Решение этой же стратегии по текущему окну уже есть. Сигнал другой
+        стратегии (пару перевели с Kronos на моментум или обратно) не в счёт:
+        иначе пара простояла бы до следующего окна."""
+        last = self.r.get(keys.SIGNAL.format(sym=sym))
+        if not last:
+            return False
+        s = json.loads(last)
+        return s["ts_close"] >= due_ms and (s.get("model") == "momentum_4h") == momentum
+
     def _publish(self, sig: dict) -> dict:
         self.r.set(keys.SIGNAL.format(sym=sig["sym"]), json.dumps(sig))
         self.r.xadd(keys.SIGNAL_STREAM, {"json": json.dumps(sig)}, maxlen=20000, approximate=True)
@@ -138,8 +148,7 @@ class SignalService:
         знак доходности за последние 24 часа, всегда в рынке."""
         period_ms = MOMENTUM_H * BAR_MIN * 60_000
         due_ms = int((now if now is not None else time.time()) * 1000) // period_ms * period_ms
-        last = self.r.get(keys.SIGNAL.format(sym=sym))
-        if last and json.loads(last)["ts_close"] >= due_ms:
+        if self._done(sym, due_ms, momentum=True):
             return None
         df = self.fetch(sym, BAR_MIN, 200)
         bar = pd.Timedelta(minutes=BAR_MIN)
@@ -160,8 +169,7 @@ class SignalService:
         """Новое решение по паре, если закрылась решающая свеча и его ещё нет."""
         period_ms = H * BAR_MIN * 60_000
         due_ms = int((now if now is not None else time.time()) * 1000) // period_ms * period_ms
-        last = self.r.get(keys.SIGNAL.format(sym=sym))
-        if last and json.loads(last)["ts_close"] >= due_ms:
+        if self._done(sym, due_ms, momentum=False):
             return None  # решение по последнему окну уже есть — свечи не нужны
         df = self.fetch(sym, BAR_MIN, 1000)
         # Решение по текущему окну — на свечах ровно до его начала: так же,

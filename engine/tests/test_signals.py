@@ -112,3 +112,15 @@ def test_pause_keeps_forecast_but_stays_flat():
     svc.r.set(keys.PAUSE_KRONOS, "дрейф")
     sig = svc.step("BTCUSDT", at("2026-10-06 16:00:30"))
     assert sig["paused"] and sig["target"] == 0 and sig["rhat"] != 0
+
+
+def test_switch_kronos_to_momentum_decides_same_window(monkeypatch):
+    # В окне уже лежит сигнал Kronos — моментум всё равно решает (а не ждёт сутки).
+    monkeypatch.setattr(ss, "STRATEGY", {"BTCUSDT": "momentum_4h"})
+    svc = service(bars("2026-10-07 00:00"))
+    svc.r.set(keys.SIGNAL.format(sym="BTCUSDT"), json.dumps({
+        "sym": "BTCUSDT", "ts_close": int(pd.Timestamp("2026-10-07 00:00").value // 1_000_000),
+        "model": "ft_small_s300", "target": 0}))
+    sig = svc.step("BTCUSDT", at("2026-10-07 03:16"))
+    assert sig and sig["model"] == "momentum_4h" and sig["target"] in (-1, 1)
+    assert svc.step("BTCUSDT", at("2026-10-07 03:17")) is None  # второй раз — нет

@@ -219,13 +219,18 @@ class FollowerStrategy(Strategy):
             cur and target and (cur > 0) == (target > 0) and abs(delta) < 0.25 * abs(cur)
         ):
             for o in open_orders:
-                self.cancel_order(o)
+                self.cancel_order(o.client_order_id)
             return
         now = self._now()
         if open_orders:
-            stale = [o for o in open_orders if now - self.order_born.get(str(o.client_order_id), now) > REQUOTE_SECS]
+            # Ордер прошлого процесса (после перезапуска пришёл из сверки с
+            # биржей): время постановки неизвестно — отсчёт с первой встречи.
+            # Иначе он навсегда «свежий» и висит по старой цене.
+            for o in open_orders:
+                self.order_born.setdefault(str(o.client_order_id), now)
+            stale = [o for o in open_orders if now - self.order_born[str(o.client_order_id)] > REQUOTE_SECS]
             for o in stale:
-                self.cancel_order(o)
+                self.cancel_order(o.client_order_id)
             return
         side = OrderSide.BUY if delta > 0 else OrderSide.SELL
         qty = inst.make_qty(Decimal(str(abs(delta))))

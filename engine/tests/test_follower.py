@@ -20,10 +20,12 @@ from nautilus_trader.model import (
     InstrumentId,
     Money,
     OmsType,
+    OrderSide,
     Price,
     Quantity,
     QuoteTick,
     Symbol,
+    TimeInForce,
     TraderId,
     Venue,
 )
@@ -166,3 +168,23 @@ def test_drawdown_halt_holds_until_reset_and_across_restarts(run):
     r.delete("ddhalt:a1:demo")
     _, seen3 = run({1: lambda r: signal(r, 0, +1)}, minutes=60, max_drawdown_pct=60, r=r)
     assert max(p for _, p in seen3) > 0
+
+
+class WithForeignOrder(Scripted):
+    """На 2-й минуте на бирже появляется ордер, о котором процесс не знает
+    (как после перезапуска): лимитка далеко от рынка."""
+
+    def _tick(self, event=None):
+        minute = (self.clock.timestamp_ns() - T0) // MIN
+        if minute == 2 and not self.cache.orders_open(instrument_id=IID):
+            q = self.cache.quote(IID)
+            self.submit_order(self.order_factory.limit(
+                IID, OrderSide.BUY, Quantity(0.01, 3), Price(float(q.bid_price) - 1000, 1),
+                post_only=True, time_in_force=TimeInForce.GTC))
+        super()._tick(event)
+
+
+def test_foreign_open_order_is_requoted_not_stuck(run, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "Scripted", WithForeignOrder)
+    _, seen = run({3: lambda r: signal(r, 0, +1)}, minutes=60)
+    assert pos_at(seen, 59) > 0.1  # позиция набрана, чужой ордер не завис навсегда
