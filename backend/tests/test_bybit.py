@@ -58,3 +58,17 @@ def test_evaluate_requires_server_ip_and_uta():
     assert not chk.ok
     assert any("109.73.198.185" in p for p in chk.problems)
     assert any("UTA" in p for p in chk.problems)
+
+
+def test_equity_counts_only_usdt():
+    from app.bybit import usdt_equity
+
+    row = {
+        "totalEquity": "185000",
+        "coin": [
+            {"coin": "BTC", "equity": "1", "usdValue": "62000"},
+            {"coin": "USDT", "equity": "47368.9"},
+        ],
+    }
+    assert usdt_equity(row) == 47368.9
+    assert usdt_equity({"totalEquity": "100"}) == 100.0  # нет разбивки по монетам

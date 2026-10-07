@@ -177,13 +177,25 @@ async def check_key(mode: Mode, key: str, secret: str) -> KeyCheck:
     return evaluate(data.get("result") or {}, ip)
 
 
+def usdt_equity(row: dict) -> float:
+    """Капитал в USDT: сервис торгует только линейными USDT-контрактами, их
+    результат, комиссии и фандинг — в USDT. Другие монеты счёта (BTC, ETH,
+    USDC) в баланс стратегии не входят: иначе график и просадка на дашборде
+    показывали бы курс биткоина, а не работу стратегии. Нет строки USDT —
+    общий баланс счёта."""
+    for c in row.get("coin") or []:
+        if c.get("coin") == "USDT":
+            return float(c.get("equity") or 0)
+    return float(row.get("totalEquity") or 0)
+
+
 async def equity(mode: Mode, key: str, secret: str) -> float | None:
-    """Баланс единого счёта в USD или None."""
+    """Баланс стратегии в USD (USDT счёта) или None."""
     data = await _get(mode, key, secret, "/v5/account/wallet-balance", "accountType=UNIFIED")
     rows = (data.get("result") or {}).get("list") or []
     if data.get("retCode") != 0 or not rows:
         return None
     try:
-        return float(rows[0].get("totalEquity") or 0)
+        return usdt_equity(rows[0])
     except (TypeError, ValueError):
         return None
