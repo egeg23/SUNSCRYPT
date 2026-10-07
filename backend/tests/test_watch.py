@@ -70,3 +70,29 @@ def test_alarm_once_then_ok(client):
     assert ("ok", "Исправилось: Сервис сигналов молчит больше 10 минут") in ev
     assert [k for k, _ in ev].count("alarm") == [k for k, _ in ev].count("ok")
     eng.dispose()
+
+
+@live
+def test_admin_sees_model_history_and_can_resume_pause(client):
+    import redis
+
+    from tests.helpers import owner_login
+
+    eng = create_engine(os.environ["DATABASE_URL"])
+    with eng.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO model_events (version, action, champion, reason, metrics) "
+                "VALUES ('ft-x', 'rejected', 'ft_small_s300', 'Не лучше чемпиона', '{}')"
+            )
+        )
+    eng.dispose()
+    r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    r.set("pause:kronos", "дрейф")
+    owner_login(client)
+    m = client.get("/api/admin/models").json()
+    assert m["champion"] == "ft_small_s300" and m["paused"] == "дрейф"
+    assert m["events"][0]["reason"] == "Не лучше чемпиона"
+    m = client.post("/api/admin/models/resume", json={}).json()
+    assert m["paused"] is None and m["events"][0]["action"] == "resumed"
+    assert r.get("pause:kronos") is None

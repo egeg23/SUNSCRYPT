@@ -8,6 +8,17 @@ import { ApiError, api } from "@/lib/api";
 import { useSubmit } from "@/lib/useForm";
 
 type InviteRow = { note: string | null; created_at: string; status: string; used_by: string | null };
+type ModelEvent = { ts: string; version: string; action: string; champion: string; reason: string };
+type Models = { champion: string; paused: string | null; events: ModelEvent[] };
+const ACTION: Record<string, string> = {
+  baseline: "исходная",
+  released: "выпущена",
+  rejected: "отклонена",
+  skipped: "пропуск",
+  rolled_back: "откат",
+  paused: "пауза",
+  resumed: "пауза снята",
+};
 type AlarmRow = { ts: string; kind: "alarm" | "ok"; message: string };
 type UserRow = { id: string; email: string; is_admin: boolean; totp_enabled: boolean; created_at: string };
 
@@ -46,6 +57,7 @@ export default function AdminPage() {
   const [link, setLink] = useState<{ url: string; hint: string } | null>(null);
   const [flags, setFlags] = useState<Record<string, boolean>>({});
   const [alarms, setAlarms] = useState<AlarmRow[]>([]);
+  const [models, setModels] = useState<Models | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -57,6 +69,7 @@ export default function AdminPage() {
       setUsers(u);
       setFlags(await api<Record<string, boolean>>("/admin/flags"));
       setAlarms(await api<AlarmRow[]>("/admin/alarms"));
+      setModels(await api<Models>("/admin/models"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/login");
       else if (e instanceof ApiError) setError(e.message);
@@ -140,6 +153,59 @@ export default function AdminPage() {
                       {a.kind === "alarm" ? "⚠ " : "✓ "}
                       {a.message}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+
+      <section>
+        <h2>Модель</h2>
+        <p style={{ fontSize: 14, maxWidth: 640 }}>
+          Сейчас торгует: <b className="mono">{models?.champion ?? "—"}</b>.{" "}
+          <span className="muted">
+            Раз в неделю модель дообучается на свежих свечах; новая версия выходит, только если на
+            последних 4 неделях (она их не видела) после комиссий лучше текущей и простых стратегий.
+            Раз в сутки живые сигналы сверяются с ожиданием: при сильном отклонении — откат или пауза.
+          </span>
+        </p>
+        {models?.paused ? (
+          <div className="card" style={{ maxWidth: 640, marginBottom: 12 }}>
+            <p className="err" style={{ marginTop: 0 }}>⚠ Kronos на паузе: {models.paused}</p>
+            <button
+              className="btn ghost"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  if (!confirm("Снять паузу? Kronos снова начнёт открывать позиции.")) return;
+                  setModels(await api<Models>("/admin/models/resume", {}));
+                })
+              }
+            >
+              Снять паузу
+            </button>
+          </div>
+        ) : null}
+        {models?.events.length ? (
+          <div className="table-wrap">
+            <table className="log">
+              <thead>
+                <tr>
+                  <th>Когда</th>
+                  <th>Версия</th>
+                  <th>Решение</th>
+                  <th>Почему</th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.events.map((e, n) => (
+                  <tr key={n}>
+                    <td className="mono">{new Date(e.ts).toLocaleString("ru-RU")}</td>
+                    <td className="mono">{e.version}</td>
+                    <td>{ACTION[e.action] ?? e.action}</td>
+                    <td>{e.reason}</td>
                   </tr>
                 ))}
               </tbody>

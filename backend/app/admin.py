@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.auth import Current, Db, check_totp, new_invite, new_reset_link, require_2fa
 from app.cache import redis
 from app.db import read_flags
-from app.models import EngineEvent, Invite, SystemFlag, User
+from app.models import EngineEvent, Invite, ModelEvent, SystemFlag, User
 from app.ratelimit import enforce
 
 log = logging.getLogger(__name__)
@@ -108,6 +108,43 @@ async def alarms(cur: Admin, db: Db) -> list[dict]:
         .limit(50)
     )
     return [{"ts": e.ts.isoformat(), "kind": e.kind, "message": e.message} for e in rows]
+
+
+@router.get("/models")
+async def models(cur: Admin, db: Db) -> dict:
+    """Версии модели: текущий чемпион, пауза, история выпусков и отказов."""
+    rows = list(await db.scalars(select(ModelEvent).order_by(ModelEvent.id.desc()).limit(100)))
+    try:
+        paused = await redis.get("pause:kronos")
+    except Exception:
+        paused = None
+    return {
+        "champion": rows[0].champion if rows else "ft_small_s300",
+        "paused": paused.decode() if paused else None,
+        "events": [
+            {
+                "ts": e.ts.isoformat(),
+                "version": e.version,
+                "action": e.action,
+                "champion": e.champion,
+                "reason": e.reason,
+            }
+            for e in rows
+        ],
+    }
+
+
+@router.post("/models/resume")
+async def models_resume(cur: Admin, db: Db) -> dict:
+    """Снять паузу Kronos, поставленную контролем дрейфа."""
+    await redis.delete("pause:kronos")
+    last = await db.scalar(select(ModelEvent).order_by(ModelEvent.id.desc()).limit(1))
+    champ = last.champion if last else "ft_small_s300"
+    db.add(
+        ModelEvent(version=champ, action="resumed", champion=champ, reason="Пауза снята владельцем")
+    )
+    await db.commit()
+    return await models(cur, db)
 
 
 @router.post("/global-stop")

@@ -81,3 +81,32 @@ def test_momentum_daily_sign_of_24h_return(monkeypatch):
     expect = np.sign(df["close"].iloc[-1] / df["close"].iloc[-25] - 1)
     assert sig["model"] == "momentum_4h" and sig["target"] == expect and sig["horizon"] == 24
     assert svc.step("DOGEUSDT", at("2026-10-07 20:00")) is None  # раз в сутки
+
+
+def test_switches_to_new_champion_and_resets_z_history(tmp_path, monkeypatch):
+    from sunscrypt_engine import registry
+
+    monkeypatch.setattr(registry, "ROOT", str(tmp_path))
+    (tmp_path / "registry" / "v2").mkdir(parents=True)
+    (tmp_path / "registry" / "v2" / "model.safetensors").write_bytes(b"x")
+    made = []
+    svc = ss.SignalService(fakeredis.FakeRedis(), StubModel(), fetch=lambda s, m, n: bars("2026-10-06 16:00"),
+                           make_forecaster=lambda v: made.append(v) or StubModel())
+    svc.step("BTCUSDT", at("2026-10-06 16:00:30"))
+    assert svc.r.llen(keys.ZHIST.format(sym="BTCUSDT")) > 0
+    svc.fetch = lambda s, m, n: bars("2026-10-07 00:00")
+    svc.sync_champion()
+    assert made == [] and svc.version == registry.BASE  # указателя нет — исходная модель
+    registry.set_champion("v2")
+    svc.sync_champion()
+    assert made == ["v2"] and svc.version == "v2"
+    assert svc.r.llen(keys.ZHIST.format(sym="BTCUSDT")) == 0
+    sig = svc.step("BTCUSDT", at("2026-10-07 00:00:30"))
+    assert sig["model"] == "v2"
+
+
+def test_pause_keeps_forecast_but_stays_flat():
+    svc = service(bars("2026-10-06 16:00"))
+    svc.r.set(keys.PAUSE_KRONOS, "дрейф")
+    sig = svc.step("BTCUSDT", at("2026-10-06 16:00:30"))
+    assert sig["paused"] and sig["target"] == 0 and sig["rhat"] != 0

@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import redis
 
-from sunscrypt_engine import keys, market
+from sunscrypt_engine import keys, market, registry
 from sunscrypt_engine import pairs as pairs_cfg
 
 log = logging.getLogger("signals")
@@ -36,7 +36,6 @@ BAR_MIN = int(os.environ.get("SIGNAL_BAR_MINUTES", "60"))
 H = int(os.environ.get("SIGNAL_HORIZON", "8"))
 CONTEXT = 256
 Z_WINDOW, Z_MIN, Z_THR = 30, 10, float(os.environ.get("SIGNAL_Z_THRESHOLD", "1.0"))
-MODEL_NAME = os.environ.get("SIGNAL_MODEL_NAME", "ft_small_s300")
 
 
 def decision_bar(ts_close: pd.Timestamp) -> bool:
@@ -79,9 +78,28 @@ class Forecaster:
         return float(r.mean()), float((r > 0).mean()), float(r.std())
 
 
+def weights_ready(version: str) -> bool:
+    return os.path.exists(os.path.join(registry.path_of(version), "model.safetensors"))
+
+
 class SignalService:
-    def __init__(self, r: redis.Redis, forecaster, fetch=market.klines):
-        self.r, self.fc, self.fetch = r, forecaster, fetch
+    def __init__(self, r: redis.Redis, forecaster, fetch=market.klines, version: str = registry.BASE,
+                 make_forecaster=None):
+        self.r, self.fc, self.fetch, self.version = r, forecaster, fetch, version
+        self.make_forecaster = make_forecaster or (lambda v: Forecaster(registry.path_of(v)))
+
+    def sync_champion(self) -> None:
+        """Выпущена или откачена версия модели (этап 8) — переходим на неё.
+        История прогнозов для z-оценки — от старой модели, её прогнозы в
+        другой шкале: стираем, backfill посчитает заново новой моделью."""
+        v = registry.champion()
+        if v == self.version or not weights_ready(v):
+            return
+        log.info("модель: %s → %s", self.version, v)
+        self.fc, self.version = self.make_forecaster(v), v
+        for sym in PAIRS:
+            if STRATEGY.get(sym) != "momentum_4h":
+                self.r.delete(keys.ZHIST.format(sym=sym))
 
     def _hist(self, sym: str) -> list[dict]:
         return [json.loads(x) for x in self.r.lrange(keys.ZHIST.format(sym=sym), 0, -1)]
@@ -159,6 +177,7 @@ class SignalService:
         rhat, pup, sd = self.fc.rhat(df.iloc[-CONTEXT:])
         hist = [h["rhat"] for h in self._hist(sym) if h["ts"] < ts_ms]
         z = zscore(hist[-Z_WINDOW:], rhat)
+        paused = self.r.get(keys.PAUSE_KRONOS)
         sig = {
             "sym": sym,
             "ts_close": ts_ms,
@@ -169,8 +188,10 @@ class SignalService:
             "pup": pup,
             "sd": sd,
             "z": z,
-            "target": target_of(z),
-            "model": MODEL_NAME,
+            # Пауза контроля дрейфа: прогноз считаем (для истории), в рынок не идём.
+            "target": 0 if paused else target_of(z),
+            "model": self.version,
+            "paused": bool(paused),
             "created_at": int(time.time() * 1000),
         }
         self._push(sym, ts_ms, rhat)
@@ -181,6 +202,7 @@ class SignalService:
         fetch = self.fetch
         self.fetch = lambda s, m, n: fetch(s, m, n, client)
         while True:
+            self.sync_champion()
             for sym in PAIRS:
                 try:
                     self.step(sym)
@@ -191,7 +213,7 @@ class SignalService:
                 # Bybit ограничивает частоту запросов с одного IP: не всё разом.
                 time.sleep(0.5)
             self.r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": PAIRS,
-                                                    "config": CONFIG["version"]}), ex=600)
+                                                    "config": CONFIG["version"], "model": self.version}), ex=600)
             # Свеча закрывается в начале часа; Bybit отдаёт её через секунды.
             time.sleep(30)
 
@@ -199,14 +221,14 @@ class SignalService:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
-    model_dir = os.environ.get("SUNS_MODEL_DIR", "/models/ft_small_s300")
-    while not os.path.exists(os.path.join(model_dir, "model.safetensors")):
+    version = registry.champion()
+    while not weights_ready(version):
         # Веса кладёт выкатка (infra/deploy.sh); без них — ждём, а не падаем.
-        log.warning("нет весов модели в %s — жду", model_dir)
+        log.warning("нет весов модели %s — жду", version)
         r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": [], "waiting": "weights"}), ex=600)
         time.sleep(60)
-    fc = Forecaster(model_dir)
-    SignalService(r, fc).loop()
+        version = registry.champion()
+    SignalService(r, Forecaster(registry.path_of(version)), version=version).loop()
 
 
 if __name__ == "__main__":

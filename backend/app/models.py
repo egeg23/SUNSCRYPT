@@ -252,3 +252,19 @@ class Funding(Base):
     sym: Mapped[str] = mapped_column(String(20))
     amount: Mapped[float] = mapped_column(Float)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ModelEvent(Base):
+    """История версий модели (этап 8): исходная, выпуск, отказ, откат,
+    пауза — с причиной и цифрами проверки."""
+
+    __tablename__ = "model_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = _now_col(index=True)
+    version: Mapped[str] = mapped_column(String(64))
+    # baseline | released | rejected | skipped | rolled_back | paused | resumed | drift_ok
+    action: Mapped[str] = mapped_column(String(16))
+    champion: Mapped[str] = mapped_column(String(64))  # чемпион после события
+    reason: Mapped[str] = mapped_column(String(1000))
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)

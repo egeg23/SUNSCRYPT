@@ -127,7 +127,7 @@ fi
 # Веса читает движок от непривилегированного пользователя (в архиве файл —
 # только для root). Кэш HuggingFace (токенизатор Kronos) он же пишет.
 [ -d "$MODELS_DIR/$W_NAME" ] && chmod -R a+rX "$MODELS_DIR/$W_NAME"
-mkdir -p "$MODELS_DIR/hf" && chown 10001 "$MODELS_DIR/hf"
+mkdir -p "$MODELS_DIR/hf" "$MODELS_DIR/registry" && chown 10001 "$MODELS_DIR/hf" "$MODELS_DIR/registry"
 export MODELS_DIR
 
 # ── 4. Сборка и запуск ──────────────────────────────────────────────────────
@@ -223,9 +223,13 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 */5 * * * * root cd $APP_DIR && docker compose -p sunscrypt --env-file $ENV_FILE -f infra/docker-compose.yml exec -T backend python -m app.watch 2>&1 | logger -t sunscrypt
 41 3 * * * root bash $APP_DIR/infra/backup.sh 2>&1 | logger -t sunscrypt
+23 4 * * * root cd $APP_DIR && MODELS_DIR=$MODELS_DIR docker compose -p sunscrypt --env-file $ENV_FILE -f infra/docker-compose.yml run --rm -T trainer python -m sunscrypt_engine.models_job drift 2>&1 | logger -t sunscrypt
+13 1 * * 0 root cd $APP_DIR && MODELS_DIR=$MODELS_DIR docker compose -p sunscrypt --env-file $ENV_FILE -f infra/docker-compose.yml run --rm -T trainer python -m sunscrypt_engine.models_job retrain 2>&1 | logger -t sunscrypt
 CRON
 chmod 644 /etc/cron.d/sunscrypt
 "${COMPOSE[@]}" exec -T backend python -m app.watch | sed 's/^/▸ /' || true
+"${COMPOSE[@]}" run --rm -T trainer python -m sunscrypt_engine.models_job drift 2>/dev/null \
+  | tail -1 | sed 's/^/▸ Модель: /' || true
 say "Копий базы: $(find "$APP_DIR/backups" -name 'sunscrypt-*.dump' 2>/dev/null | wc -l)"
 
 # ── 7. Мастер-ключ и демо-ключ Bybit владельца ──────────────────────────────
