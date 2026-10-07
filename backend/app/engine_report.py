@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from app.cache import redis
 from app.db import SessionLocal
-from app.models import EngineEvent, ExchangeAccount, Trade
+from app.models import EngineEvent, ExchangeAccount, Trade, User
 
 
 async def main() -> None:
@@ -20,6 +20,10 @@ async def main() -> None:
     hb = await redis.get("hb:signals")
     print(f"▸ Сигналы: {'живы' if hb else 'нет сердцебиения'}")
     async with SessionLocal() as db:
+        linked = await db.scalar(
+            select(func.count()).select_from(User).where(User.telegram_chat_id.is_not(None))
+        )
+        print(f"▸ Telegram: привязано аккаунтов — {linked}")
         accounts = list(await db.scalars(select(ExchangeAccount)))
         print(
             f"▸ Кабинетов: {len(accounts)}, с торговлей: {sum(a.trading_enabled for a in accounts)}"

@@ -243,6 +243,12 @@ async def notify_fill(tg: TG, channel: str, data: dict) -> None:
         chat, name = await _chat_of_account(db, aid)
     if chat:
         await tg.send(chat, fmt_fill(data, name))
+        if data.get("ts"):  # от исполнения на бирже до отправки в Telegram (бриф: < 5 с)
+            log.info(
+                "сделка %s → Telegram за %.1f с",
+                data.get("sym"),
+                time.time() - int(data["ts"]) / 1000,
+            )
 
 
 async def fills_loop(tg: TG) -> None:
