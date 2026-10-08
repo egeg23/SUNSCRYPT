@@ -37,6 +37,11 @@ MAKER_PATIENCE_SECS = 20 * 60
 # рынку: на быстром рынке (и на демо) лимитка у края стакана может не
 # встать никогда, а у моментума весь смысл — во входе в начале суток.
 MAKER_REJECTS_MAX = 3
+# Заявка больше стольких долей пары — значит, на счёте чужая позиция (ручная,
+# другой бот): исполнитель её не трогает и зовёт человека. Свой переворот —
+# до 2 долей (+ движение цены), поэтому 3. Так 06.10 исполнитель закрыл чужие
+# 55.7 BTC (4.7 млн USD) на демо-счёте владельца.
+MAX_ORDER_SHARES = 3.0
 
 
 class FollowerConfig(StrategyConfig):
@@ -87,6 +92,7 @@ class FollowerStrategy(Strategy):
         self.target_since: dict[str, tuple[int, float]] = {}  # sym → (target, с какого момента)
         self.maker_rejects: dict[str, int] = {}  # sym → отказы post-only подряд
         self.book: dict[str, tuple[float, float]] = {}  # sym → (позиция со знаком, средняя цена входа)
+        self.blocked: dict[str, str] = {}  # sym → почему пара не трогается
 
     # ── жизненный цикл ──────────────────────────────────────────────────────
     def on_start(self) -> None:
@@ -265,11 +271,23 @@ class FollowerStrategy(Strategy):
         cur = float(self.portfolio.net_position(iid))
         step = float(inst.size_increment)
         delta = round((want - cur) / step) * step
+        open_orders = self.cache.orders_open(instrument_id=iid)
+        if abs(delta) * mid > MAX_ORDER_SHARES * per_pair:
+            why = (
+                f"позиция {cur:g} ({abs(cur) * mid:,.0f} USD) больше доли пары "
+                f"({per_pair:,.0f} USD) — похоже, не наша; пара не трогается"
+            ).replace(",", " ")
+            if self.blocked.get(sym) != why:
+                self.log.warning(f"{sym}: {why}")
+            self.blocked[sym] = why
+            for o in open_orders:
+                self.cancel_order(o.client_order_id)
+            return
+        self.blocked.pop(sym, None)
         prev = self.target_since.get(sym)
         if prev is None or prev[0] != target:
             self.target_since[sym] = (target, self._now())
             self.maker_rejects[sym] = 0
-        open_orders = self.cache.orders_open(instrument_id=iid)
         if abs(delta) < step / 2 or (
             cur and target and (cur > 0) == (target > 0) and abs(delta) < 0.25 * abs(cur)
         ):
@@ -322,6 +340,7 @@ class FollowerStrategy(Strategy):
             "pnl": round(self._pnl(), 4),
             "day_pnl": round(self.carry + self._pnl() - self.day_start_pnl, 4),
             "halted": self.halted,
+            "blocked": self.blocked,
             "open_orders": len(self.cache.orders_open()),
         }
         self.r.set(keys.HB_ACCOUNT.format(id=self.cfg.account_id), json.dumps(hb), ex=120)

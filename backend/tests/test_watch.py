@@ -5,6 +5,7 @@ import json
 import os
 import time
 
+import pytest
 from sqlalchemy import create_engine, text
 
 from tests.conftest import live
@@ -99,3 +100,35 @@ def test_admin_sees_model_history_and_can_resume_pause(client):
     assert m["paused"] is None and m["events"][0]["action"] == "resumed"
     assert r.get("pause:kronos") is None and r.get("pause:pair:ADAUSDT") is None
     assert int(r.get("drift:since:ADAUSDT")) > 0  # дрейф пары считается заново
+
+
+@live
+def test_foreign_position_raises_alarm(client):
+    import redis
+    from redis.asyncio import Redis
+
+    from app import watch
+
+    eng = create_engine(os.environ["DATABASE_URL"])
+    with eng.connect() as c:
+        aid = c.execute(
+            text("SELECT id FROM exchange_accounts WHERE trading_enabled AND NOT stopped LIMIT 1")
+        ).scalar()
+    eng.dispose()
+    if aid is None:
+        pytest.skip("нет кабинета с торговлей")
+    r = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    r.set(
+        f"hb:acct:{aid}",
+        json.dumps({"ts": int(time.time() * 1000), "blocked": {"ADAUSDT": "позиция не наша"}}),
+    )
+
+    async def go():
+        ar = Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+        try:
+            return await watch.problems(ar)
+        finally:
+            await ar.aclose()
+
+    out = asyncio.run(go())
+    assert "ADAUSDT: позиция не наша" in out[f"foreign:{aid}:ADAUSDT"][1]

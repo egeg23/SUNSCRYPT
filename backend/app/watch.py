@@ -41,7 +41,14 @@ async def problems(redis) -> dict[str, tuple[str | None, str]]:
             if a.status != "ok":
                 out[f"key:{aid}"] = (aid, f"Ключ Bybit кабинета {tag} не проходит проверку")
             raw = await redis.get(f"hb:acct:{aid}")
-            age = now - json.loads(raw)["ts"] / 1000 if raw else None
+            hb = json.loads(raw) if raw else {}
+            age = now - hb["ts"] / 1000 if raw else None
+            for sym, why in (hb.get("blocked") or {}).items():
+                out[f"foreign:{aid}:{sym}"] = (
+                    aid,
+                    f"Кабинет {tag}, {sym}: {why}. Закройте чужую позицию на Bybit "
+                    "или уберите пару — дальше исполнитель продолжит сам",
+                )
             if age is None or age > HB_STALE_S:
                 when = f"{age / 60:.0f} мин" if age is not None else "давно"
                 out[f"hb:{aid}"] = (aid, f"Исполнитель кабинета {tag} молчит ({when})")

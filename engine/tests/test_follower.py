@@ -238,3 +238,22 @@ def test_post_only_rejects_fall_back_to_market_quickly(run, monkeypatch):
     _, seen = run({1: lambda r: signal(r, 0, +1)}, minutes=30)
     # Без отката на рынок ждал бы 20 минут; три отказа по 15 с — и по рынку.
     assert pos_at(seen, 3) > 0.1
+
+
+class WithForeignPosition(Scripted):
+    """На 1-й минуте на счёте появляется чужая позиция 1 BTC (≈ 80 000 USD
+    при доле пары 10 000) — как ручная сделка владельца."""
+
+    def _tick(self, event=None):
+        minute = (self.clock.timestamp_ns() - T0) // MIN
+        if minute == 1 and not self.portfolio.net_position(IID):
+            self.submit_order(self.order_factory.market(IID, OrderSide.BUY, Quantity(1, 3)))
+        super()._tick(event)
+
+
+def test_foreign_position_is_left_alone_and_reported(run, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "Scripted", WithForeignPosition)
+    r, seen = run({3: lambda r: signal(r, 0, 0)}, minutes=30)
+    assert pos_at(seen, 29) == pytest.approx(1.0)  # не закрыта исполнителем
+    hb = json.loads(r.get(keys.HB_ACCOUNT.format(id="a1")))
+    assert "не наша" in hb["blocked"]["BTCUSDT"]
