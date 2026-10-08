@@ -56,16 +56,18 @@ async def _days(db, a: ExchangeAccount) -> None:
         if eq[0] is not None:
             parts.append(f"баланс {eq[0]:.2f} → {eq[1]:.2f}")
         print(f"    {start:%m-%d}: " + "; ".join(parts))
-    # Комиссия больше 1% объёма — ошибка записи, а не комиссия: портит статистику.
-    odd = await db.scalars(
+    # Самые дорогие сделки за неделю: комиссия больше 1% объёма — ошибка записи;
+    # огромный объём — не наша сделка (ручная на том же счёте) или сбой размера.
+    top = await db.scalars(
         select(Trade)
-        .where(Trade.account_id == a.id, Trade.fee > 0.01 * Trade.qty * Trade.price)
-        .order_by(Trade.ts.desc())
-        .limit(5)
+        .where(Trade.account_id == a.id, Trade.ts >= today - timedelta(days=7))
+        .order_by(Trade.fee.desc())
+        .limit(3)
     )
-    for t in odd:
+    for t in top:
+        odd = "⚠ " if t.fee > 0.01 * t.qty * t.price else ""
         print(
-            f"    ⚠ комиссия {t.fee} {t.fee_ccy} при объёме {t.qty * t.price:.2f}: "
+            f"    {odd}дорогая: комиссия {t.fee:.2f} {t.fee_ccy}, объём {t.qty * t.price:.0f}: "
             f"{t.ts:%m-%d %H:%M} {t.mode} {t.sym} {t.side} {t.qty}@{t.price} "
             f"{t.liquidity} ({t.source})"
         )
