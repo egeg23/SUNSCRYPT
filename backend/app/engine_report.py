@@ -48,6 +48,8 @@ async def _days(db, a: ExchangeAccount) -> None:
             for first in (True, False)
         ]
         parts = []
+        if (halt := await redis.get(f"dayhalt:{a.id}:{day}")) is not None:
+            parts.append(f"СТОП ДНЯ: {halt.decode()}")
         if total is not None:
             parts.append(f"результат с позициями {float(total):+.2f}")
         if net:
@@ -132,7 +134,10 @@ async def main() -> None:
                 state += ", аварийная остановка"
             print(f"  [{tag}] {state}; ключ {a.status}; сделок в журнале {n}")
             bal = f"{a.equity_usd:.2f}" if a.equity_usd is not None else "—"
-            print(f"    баланс USDT {bal}; капитал стратегии {a.capital_usd}, плечо {a.leverage}")
+            print(
+                f"    баланс USDT {bal}; капитал стратегии {a.capital_usd}, плечо {a.leverage}; "
+                f"дневной лимит {a.daily_loss_pct}%, лимит просадки {a.max_drawdown_pct}%"
+            )
             await _days(db, a)
             if h:
                 print(
