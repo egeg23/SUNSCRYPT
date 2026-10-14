@@ -166,6 +166,17 @@ if [ -n "$("${COMPOSE[@]}" ps -q postgres 2>/dev/null)" ]; then
 fi
 say "Собираю и запускаю (порт $WEB_PORT)"
 "${COMPOSE[@]}" up -d --build --remove-orphans
+# Сервис, который Docker бросил перезапускать (13.10 сигналы застряли в
+# «restarting» на сутки после нехватки места на диске), — поднимаем заново.
+"${COMPOSE[@]}" ps -a --format '{{.Service}} {{.State}}' 2>/dev/null \
+  | awk '$1 != "trainer" && ($2 == "restarting" || $2 == "exited" || $2 == "dead") {print $1}' \
+  | sort -u | while read -r svc; do
+      say "Сервис $svc не работал — пересоздаю"
+      "${COMPOSE[@]}" up -d --force-recreate --no-deps "$svc"
+    done
+# Старые образы после пересборки — только свои (метка проекта Compose), чужие
+# не трогаем: сервер общий.
+docker image prune -f --filter "label=com.docker.compose.project=sunscrypt" >/dev/null 2>&1 || true
 # Конфиг шлюза подключён файлом: контейнер его сам не перечитывает.
 "${COMPOSE[@]}" exec -T gateway sh -c 'nginx -t -q && nginx -s reload' \
   || echo "⚠ шлюз не перечитал конфиг" >&2

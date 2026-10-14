@@ -212,20 +212,31 @@ class SignalService:
         fetch = self.fetch
         self.fetch = lambda s, m, n: fetch(s, m, n, client)
         while True:
-            self.sync_champion()
-            for sym in PAIRS:
-                try:
-                    self.step(sym)
-                except (httpx.HTTPError, RuntimeError) as e:
-                    log.warning("%s: свечи не получены: %s", sym, e)
-                except Exception:
-                    log.exception("%s: сигнал не посчитан", sym)
-                # Bybit ограничивает частоту запросов с одного IP: не всё разом.
-                time.sleep(0.5)
-            self.r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": PAIRS,
-                                                    "config": CONFIG["version"], "model": self.version}), ex=600)
+            try:
+                self._round()
+            except redis.RedisError as e:
+                # Redis не принимает запись (например, кончилось место на
+                # диске): ждём и пробуем снова, а не падаем — иначе после
+                # нескольких десятков падений Docker перестаёт перезапускать.
+                log.error("Redis недоступен: %s — повтор через 30 с", e)
             # Свеча закрывается в начале часа; Bybit отдаёт её через секунды.
             time.sleep(30)
+
+    def _round(self) -> None:
+        self.sync_champion()
+        for sym in PAIRS:
+            try:
+                self.step(sym)
+            except (httpx.HTTPError, RuntimeError) as e:
+                log.warning("%s: свечи не получены: %s", sym, e)
+            except redis.RedisError:
+                raise
+            except Exception:
+                log.exception("%s: сигнал не посчитан", sym)
+            # Bybit ограничивает частоту запросов с одного IP: не всё разом.
+            time.sleep(0.5)
+        self.r.set(keys.HB_SIGNALS, json.dumps({"ts": int(time.time() * 1000), "pairs": PAIRS,
+                                                "config": CONFIG["version"], "model": self.version}), ex=600)
 
 
 def main() -> None:

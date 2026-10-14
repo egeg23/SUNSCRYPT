@@ -199,3 +199,19 @@ async def equity(mode: Mode, key: str, secret: str) -> float | None:
         return usdt_equity(rows[0])
     except (TypeError, ValueError):
         return None
+
+
+async def positions(mode: Mode, key: str, secret: str) -> list[dict] | None:
+    """Открытые линейные USDT-позиции: [{symbol, side, size, avgPrice, ...}] или None."""
+    data = await _get(mode, key, secret, "/v5/position/list", "category=linear&settleCoin=USDT")
+    if data.get("retCode") != 0:
+        return None
+    rows = (data.get("result") or {}).get("list") or []
+    return [r for r in rows if float(r.get("size") or 0)]
+
+
+async def open_orders(mode: Mode, key: str, secret: str) -> list[dict] | None:
+    data = await _get(mode, key, secret, "/v5/order/realtime", "category=linear&settleCoin=USDT")
+    if data.get("retCode") != 0:
+        return None
+    return (data.get("result") or {}).get("list") or []

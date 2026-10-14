@@ -8,6 +8,7 @@
 
 import asyncio
 import json
+import shutil
 import time
 import uuid
 
@@ -19,12 +20,18 @@ from app.models import EngineEvent, ExchangeAccount, SystemFlag
 
 STATE = "watch:state"
 HB_STALE_S = 180  # исполнитель шлёт сердцебиение раз в 15 с
+DISK_MIN_FREE = 5 * 2**30  # меньше 5 ГБ — тревога
 
 
 async def problems(redis) -> dict[str, tuple[str | None, str]]:
     """{ключ беды: (id кабинета или None, текст)}."""
     out: dict[str, tuple[str | None, str]] = {}
     now = time.time()
+    # Место на диске (корень контейнера — тот же диск, что у Docker на сервере):
+    # 13.10 кончилось — Redis перестал писать, сервис сигналов упал на сутки.
+    du = shutil.disk_usage("/")
+    if du.free < DISK_MIN_FREE:
+        out["disk"] = (None, f"На диске сервера мало места: свободно {du.free / 2**30:.1f} ГБ")
     if not await redis.get("hb:signals"):
         out["signals"] = (None, "Сервис сигналов молчит больше 10 минут")
     async with SessionLocal() as db:

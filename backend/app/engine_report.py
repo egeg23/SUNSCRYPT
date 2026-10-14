@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
+from app import bybit
+from app.accounts import active_secrets
 from app.cache import redis
 from app.db import SessionLocal
 from app.models import EngineEvent, EquitySnapshot, ExchangeAccount, Trade, User
@@ -103,8 +105,41 @@ async def main() -> None:
             if h:
                 print(
                     f"    исполнитель: {now - h['ts'] / 1000:.0f} с назад; "
-                    f"позиции {h['positions']}; PnL {h['pnl']}; "
-                    f"стоит: {h['halted']}; ордеров {h['open_orders']}"
+                    f"позиции {h.get('positions')}; PnL {h.get('pnl')}; "
+                    f"стоит: {h.get('halted')}; ордеров {h.get('open_orders')}; "
+                    f"не трогает: {h.get('blocked') or 'нет'}"
+                )
+            try:
+                key, secret = await active_secrets(db, a)
+                pos = await bybit.positions(a.mode, key, secret)
+                orders = await bybit.open_orders(a.mode, key, secret)
+            except Exception as e:  # отчёт не должен падать из-за биржи
+                pos, orders = None, None
+                print(f"    Bybit недоступен: {type(e).__name__}")
+            if pos is not None:
+                print(
+                    "    на Bybit позиции: "
+                    + (
+                        ", ".join(
+                            f"{p['symbol']} {p['side']} {p['size']}@{p.get('avgPrice')} "
+                            f"(PnL {float(p.get('unrealisedPnl') or 0):+.2f})"
+                            for p in pos
+                        )
+                        or "нет"
+                    )
+                )
+            if orders is not None:
+                print(
+                    "    на Bybit заявки: "
+                    + (
+                        ", ".join(
+                            f"{o['symbol']} {o['side']} {o['qty']}@{o.get('price')} "
+                            f"{o.get('orderType')} {'RO ' if o.get('reduceOnly') else ''}"
+                            f"{o.get('createdTime', '')[:10]}"
+                            for o in orders
+                        )
+                        or "нет"
+                    )
                 )
             rec = await redis.get(f"recon:{a.id}")
             if rec:
@@ -117,7 +152,7 @@ async def main() -> None:
                 select(EngineEvent)
                 .where(EngineEvent.account_id == a.id)
                 .order_by(EngineEvent.ts.desc())
-                .limit(6)
+                .limit(25)
             )
             for e in events:
                 print(f"    {e.ts:%m-%d %H:%M} {e.kind}: {e.message}")
