@@ -9,7 +9,7 @@ import json
 import time
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 
 from app import bybit
 from app.accounts import active_secrets
@@ -58,6 +58,38 @@ async def _days(db, a: ExchangeAccount) -> None:
         if eq[0] is not None:
             parts.append(f"баланс {eq[0]:.2f} → {eq[1]:.2f}")
         print(f"    {start:%m-%d}: " + "; ".join(parts))
+    # Все сделки за 3 дня и баланс по часам — разбор дней с большим убытком.
+    trades = await db.scalars(
+        select(Trade)
+        .where(Trade.account_id == a.id, Trade.ts >= today - timedelta(days=2))
+        .order_by(Trade.ts)
+    )
+    for t in trades:
+        print(
+            f"    сделка {t.ts:%m-%d %H:%M} {t.sym} {t.side} {t.qty}@{t.price} "
+            f"{t.liquidity} ({t.source})"
+        )
+    hour = func.date_trunc(literal_column("'hour'"), EquitySnapshot.ts)
+    hours = (
+        await db.execute(
+            select(
+                hour,
+                func.min(EquitySnapshot.equity_usd),
+                func.max(EquitySnapshot.equity_usd),
+            )
+            .where(
+                EquitySnapshot.account_id == a.id,
+                EquitySnapshot.ts >= today - timedelta(days=2),
+            )
+            .group_by(hour)
+            .order_by(hour)
+        )
+    ).all()
+    if hours:
+        print(
+            "    баланс по часам (мин–макс): "
+            + "; ".join(f"{h:%d %H}ч {lo:.0f}–{hi:.0f}" for h, lo, hi in hours)
+        )
     # Самые дорогие сделки за неделю: комиссия больше 1% объёма — ошибка записи;
     # огромный объём — не наша сделка (ручная на том же счёте) или сбой размера.
     top = await db.scalars(
